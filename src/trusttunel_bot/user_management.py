@@ -14,6 +14,11 @@ class UserChangeResult:
     used_hot_reload: bool
 
 
+def list_users(config: BotConfig) -> list[str]:
+    credentials = load_credentials(config.credentials_file)
+    return [client.username for client in credentials]
+
+
 def add_user(config: BotConfig, username: str, password: str) -> UserChangeResult:
     credentials = load_credentials(config.credentials_file)
     if any(client.username == username for client in credentials):
