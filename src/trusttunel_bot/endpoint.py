@@ -4,7 +4,11 @@ from dataclasses import dataclass
 from pathlib import Path
 import subprocess
 import tempfile
-import tomllib
+
+try:
+    import tomllib
+except ModuleNotFoundError:  # pragma: no cover - py<3.11 fallback
+    import tomli as tomllib
 
 from trusttunel_bot.config import BotConfig
 
@@ -33,6 +37,7 @@ def generate_endpoint_config(
     output_path: Path | None = None,
 ) -> EndpointConfigResult:
     vpn_config, hosts_config, endpoint_address = _ensure_endpoint_settings(config)
+    _validate_vpn_config_paths(vpn_config)
     result = _run_command_safely(
         [
             "trusttunnel_endpoint",
@@ -44,6 +49,7 @@ def generate_endpoint_config(
             endpoint_address,
         ],
         timeout_s=config.endpoint_command_timeout_s,
+        cwd=vpn_config.parent,
     )
     endpoint_path = output_path or Path(tempfile.gettempdir()) / f"{username}.endpoint.toml"
     endpoint_path.write_text(result.stdout, encoding="utf-8")
@@ -55,12 +61,12 @@ def build_connection_profile(
     server_name: str | None = None,
 ) -> ConnectionProfile:
     data = tomllib.loads(endpoint_config_path.read_text(encoding="utf-8"))
-    hostname = _get_value(data, "hostname")
-    addresses = _get_value(data, "addresses")
-    username = _get_value(data, "username")
-    password = _get_value(data, "password")
-    protocol = _get_value(data, "protocol")
-    dns = _get_value(data, "dns", required=False)
+    hostname = _get_value(data, ["hostname"])
+    addresses = _get_value(data, ["addresses"])
+    username = _get_value(data, ["username"])
+    password = _get_value(data, ["password"])
+    protocol = _get_value(data, ["upstream_protocol", "protocol"])
+    dns = _get_value(data, ["dns_upstreams", "dns"], required=False)
     missing = [
         name
         for name, value in {
@@ -95,17 +101,20 @@ def build_connection_profile(
 
 def format_connection_profile(profile: ConnectionProfile) -> str:
     lines = [
-        "Профиль подключения:",
-        f"Server name: {profile.server_name}",
-        f"Address: {profile.address}",
-        f"Hostname: {profile.hostname}",
-        f"Username/Password: {profile.username}/{profile.password}",
-        f"Protocol: {profile.protocol}",
-        f"DNS: {profile.dns}",
+        "Профиль подключения (копируйте блок ниже):",
+        "",
+        "Server name: " + profile.server_name,
+        "Address: " + profile.address,
+        "Hostname: " + profile.hostname,
+        "Username: " + profile.username,
+        "Password: " + profile.password,
+        "Protocol: " + profile.protocol,
+        "DNS: " + profile.dns,
     ]
     if profile.self_signed:
         lines.append("⚠️ Сертификат self-signed — Flutter-клиент не подключится.")
-    return "\n".join(lines)
+    body = "\n".join(lines)
+    return f"<pre>{body}</pre>"
 
 
 @dataclass(frozen=True)
@@ -115,13 +124,14 @@ class CommandResult:
     exit_code: int
 
 
-def _run_command_safely(args: list[str], timeout_s: int) -> CommandResult:
+def _run_command_safely(args: list[str], timeout_s: int, cwd: Path | None = None) -> CommandResult:
     completed = subprocess.run(
         args,
         capture_output=True,
         text=True,
         timeout=timeout_s,
         check=False,
+        cwd=str(cwd) if cwd else None,
     )
     if completed.returncode != 0:
         raise RuntimeError(
@@ -141,13 +151,37 @@ def _ensure_endpoint_settings(config: BotConfig) -> tuple[Path, Path, str]:
     return config.vpn_config, config.hosts_config, config.endpoint_public_address
 
 
-def _get_value(data: dict, key: str, required: bool = True):
-    if key in data:
-        return data[key]
+def _validate_vpn_config_paths(vpn_config: Path) -> None:
+    data = tomllib.loads(vpn_config.read_text(encoding="utf-8"))
+    credentials_file = data.get("credentials_file")
+    rules_file = data.get("rules_file")
+    if credentials_file:
+        _ensure_path_exists(vpn_config, credentials_file, "credentials_file")
+    if rules_file:
+        _ensure_path_exists(vpn_config, rules_file, "rules_file")
+
+
+def _ensure_path_exists(vpn_config: Path, value: str, field_name: str) -> None:
+    candidate = Path(value)
+    if not candidate.is_absolute():
+        candidate = vpn_config.parent / candidate
+    if not candidate.exists():
+        raise ValueError(
+            f"{field_name} not found: {candidate}. "
+            "Use an absolute path or place the file next to vpn.toml."
+        )
+
+
+def _get_value(data: dict, keys: list[str], required: bool = True):
+    for key in keys:
+        if key in data:
+            return data[key]
     for section_key in ("endpoint", "client", "connection"):
         section = data.get(section_key)
-        if isinstance(section, dict) and key in section:
-            return section[key]
+        if isinstance(section, dict):
+            for key in keys:
+                if key in section:
+                    return section[key]
     if required:
         return None
     return None
