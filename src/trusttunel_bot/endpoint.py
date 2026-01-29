@@ -114,7 +114,7 @@ def format_connection_profile(profile: ConnectionProfile, dns_override: str | No
     if profile.self_signed:
         lines.append("⚠️ Сертификат self-signed — Flutter-клиент не подключится.")
     body = "\n".join(lines)
-    return f"<pre>{body}</pre>"
+    return f"{body}"
 
 
 @dataclass(frozen=True)
