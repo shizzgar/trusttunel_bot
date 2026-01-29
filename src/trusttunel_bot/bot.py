@@ -301,7 +301,7 @@ async def _send_configs(
     dns_override = ", ".join(config.dns_upstreams) if config.dns_upstreams else None
     await bot.send_message(
         chat_id=chat_id,
-        text="Скачать Android Клиент можно зедсь:\nhttps://github.com/TrustTunnel/TrustTunnelFlutterClient/releases/latest\n\n" + format_connection_profile(profile, dns_override=dns_override),
+        text="Скачать Мобильный Клиент можно здесь:\nhttps://github.com/TrustTunnel/TrustTunnelFlutterClient/releases/latest\nТам будут ссылки на GooglePlay/Appstore.\n В случае проблем с загрузкой с GooglePlay качайте apk из релиза непосредственно.\n\n" + format_connection_profile(profile, dns_override=dns_override),
     )
 
 
