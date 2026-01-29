@@ -130,7 +130,13 @@ def _build_client_config_from_endpoint(
             "Endpoint config is missing required fields: " + ", ".join(sorted(missing))
         )
     skip_verification = False
-    lines: list[str] = ["[endpoint]"]
+    
+    lines: list[str] = ["vpn_mode = \"general\""]
+    lines.append(f"killswitch_enabled = true")
+
+    if dns_upstreams:
+        lines.append(f"dns_upstreams = {_format_list(dns_upstreams)}")
+    lines.append(f"[endpoint]")
     lines.append(f"hostname = \"{_escape(str(hostname))}\"")
     lines.append(f"addresses = {_format_list(addresses)}")
     if has_ipv6 is not None:
@@ -147,8 +153,13 @@ def _build_client_config_from_endpoint(
     else:
         skip_verification = True
         lines.append("skip_verification = true")
-    if dns_upstreams:
-        lines.append(f"dns_upstreams = {_format_list(dns_upstreams)}")
+    lines.append("[listener]")
+    lines.append("[listener.tun]")
+    lines.append("bound_if = \"\"")
+    lines.append("included_routes = [\"0.0.0.0/0\", \"2000::/3\", \"10.3.2.1/32\"]")
+    lines.append("excluded_routes = [\"0.0.0.0/8\", \"169.254.0.0/16\", \"172.16.0.0/12\", \"192.168.0.0/16\", \"224.0.0.0/3\"]")
+    lines.append("mtu_size = 1500")
+    lines.append("change_system_dns = true")
     content = "\n".join(lines).rstrip() + "\n"
     return content, skip_verification
 
