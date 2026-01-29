@@ -261,7 +261,7 @@ async def _send_configs(
         )
         profile = build_connection_profile(endpoint.output_path)
     except (RuntimeError, ValueError) as exc:
-        await bot.send_message(chat_id=chat_id, text=f"Ошибка генерации: {exc}")
+        await _send_error(bot, chat_id, f"Ошибка генерации: {exc}")
         return
     await bot.send_document(chat_id=chat_id, document=FSInputFile(endpoint.output_path))
     await bot.send_document(chat_id=chat_id, document=FSInputFile(client_config.output_path))
@@ -289,6 +289,14 @@ def _normalize_username(text: str) -> str | None:
 
 def _generate_password() -> str:
     return secrets.token_urlsafe(12)
+
+
+async def _send_error(bot: Bot, chat_id: int, text: str) -> None:
+    max_len = 3900
+    cleaned = text.replace("\r", "")
+    if len(cleaned) > max_len:
+        cleaned = cleaned[: max_len - 1] + "…"
+    await bot.send_message(chat_id=chat_id, text=cleaned)
 
 
 def build_dispatcher(config: BotConfig) -> Dispatcher:
