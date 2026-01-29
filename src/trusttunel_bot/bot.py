@@ -296,12 +296,12 @@ async def _send_configs(
     await bot.send_document(
         chat_id=chat_id,
         document=FSInputFile(client_config.output_path),
-        caption="CLI config",
+        caption="Скачать CLI Клиент можно здесь: \n https://github.com/TrustTunnel/TrustTunnelClient/releases/latest",
     )
     dns_override = ", ".join(config.dns_upstreams) if config.dns_upstreams else None
     await bot.send_message(
         chat_id=chat_id,
-        text=format_connection_profile(profile, dns_override=dns_override),
+        text="Скачать Android Клиент можно зедсь: \n https://github.com/TrustTunnel/TrustTunnelFlutterClient/releases/latest \n" + format_connection_profile(profile, dns_override=dns_override),
     )
 
 
