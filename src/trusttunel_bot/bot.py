@@ -7,6 +7,7 @@ import secrets
 from typing import Callable
 
 from aiogram import Bot, Dispatcher, F
+from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.filters import Command
 from aiogram.types import (
@@ -321,7 +322,10 @@ def run_bot() -> None:
     _ensure_bot_config(config)
 
     async def _runner() -> None:
-        bot = Bot(token=config.telegram_token, parse_mode=ParseMode.HTML)
+        bot = Bot(
+            token=config.telegram_token,
+            default=DefaultBotProperties(parse_mode=ParseMode.HTML),
+        )
         dispatcher = build_dispatcher(config)
         await dispatcher.start_polling(bot)
 

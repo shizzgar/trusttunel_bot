@@ -11,8 +11,6 @@ except ModuleNotFoundError:  # pragma: no cover - py<3.11 fallback
 
 from trusttunel_bot.config import BotConfig
 
-from trusttunel_bot.config import BotConfig
-
 
 @dataclass(frozen=True)
 class ClientConfigResult:
