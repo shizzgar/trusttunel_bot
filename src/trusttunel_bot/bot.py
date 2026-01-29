@@ -4,6 +4,7 @@ import asyncio
 from dataclasses import dataclass
 from pathlib import Path
 import secrets
+import tempfile
 from aiogram import Bot, Dispatcher, F
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
@@ -297,6 +298,10 @@ async def _send_error(bot: Bot, chat_id: int, text: str) -> None:
     if len(cleaned) > max_len:
         cleaned = cleaned[: max_len - 1] + "…"
     await bot.send_message(chat_id=chat_id, text=cleaned)
+    if len(text) > max_len:
+        error_path = Path(tempfile.gettempdir()) / "trusttunnel_error.txt"
+        error_path.write_text(text, encoding="utf-8")
+        await bot.send_document(chat_id=chat_id, document=FSInputFile(error_path))
 
 
 def build_dispatcher(config: BotConfig) -> Dispatcher:
