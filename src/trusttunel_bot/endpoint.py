@@ -55,12 +55,12 @@ def build_connection_profile(
     server_name: str | None = None,
 ) -> ConnectionProfile:
     data = tomllib.loads(endpoint_config_path.read_text(encoding="utf-8"))
-    hostname = _get_value(data, "hostname")
-    addresses = _get_value(data, "addresses")
-    username = _get_value(data, "username")
-    password = _get_value(data, "password")
-    protocol = _get_value(data, "protocol")
-    dns = _get_value(data, "dns", required=False)
+    hostname = _get_value(data, ["hostname"])
+    addresses = _get_value(data, ["addresses"])
+    username = _get_value(data, ["username"])
+    password = _get_value(data, ["password"])
+    protocol = _get_value(data, ["upstream_protocol", "protocol"])
+    dns = _get_value(data, ["dns_upstreams", "dns"], required=False)
     missing = [
         name
         for name, value in {
@@ -141,13 +141,16 @@ def _ensure_endpoint_settings(config: BotConfig) -> tuple[Path, Path, str]:
     return config.vpn_config, config.hosts_config, config.endpoint_public_address
 
 
-def _get_value(data: dict, key: str, required: bool = True):
-    if key in data:
-        return data[key]
+def _get_value(data: dict, keys: list[str], required: bool = True):
+    for key in keys:
+        if key in data:
+            return data[key]
     for section_key in ("endpoint", "client", "connection"):
         section = data.get(section_key)
-        if isinstance(section, dict) and key in section:
-            return section[key]
+        if isinstance(section, dict):
+            for key in keys:
+                if key in section:
+                    return section[key]
     if required:
         return None
     return None
