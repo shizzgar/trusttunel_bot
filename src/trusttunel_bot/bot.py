@@ -264,8 +264,16 @@ async def _send_configs(
     except (RuntimeError, ValueError) as exc:
         await _send_error(bot, chat_id, f"Ошибка генерации: {exc}")
         return
-    await bot.send_document(chat_id=chat_id, document=FSInputFile(endpoint.output_path))
-    await bot.send_document(chat_id=chat_id, document=FSInputFile(client_config.output_path))
+    await bot.send_document(
+        chat_id=chat_id,
+        document=FSInputFile(endpoint.output_path),
+        caption="Endpoint config (для mobile)",
+    )
+    await bot.send_document(
+        chat_id=chat_id,
+        document=FSInputFile(client_config.output_path),
+        caption="CLI config",
+    )
     await bot.send_message(chat_id=chat_id, text=format_connection_profile(profile))
 
 
