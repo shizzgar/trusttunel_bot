@@ -25,7 +25,7 @@ from trusttunel_bot.endpoint import (
     generate_endpoint_config,
 )
 from trusttunel_bot.rules import format_rules_summary, load_rules
-from trusttunel_bot.user_management import add_user, delete_user
+from trusttunel_bot.user_management import add_user, delete_user, list_users
 
 
 @dataclass
@@ -129,6 +129,10 @@ async def handle_callback(
         await callback.answer("Недостаточно прав.")
         await show_menu(callback.bot, chat_id, is_admin)
         return
+    if action and action.startswith("delete_user:") and not is_admin:
+        await callback.answer("Недостаточно прав.")
+        await show_menu(callback.bot, chat_id, is_admin)
+        return
 
     if action == "add_user":
         state.mode = "add_user"
@@ -140,12 +144,23 @@ async def handle_callback(
             _menu_keyboard(is_admin),
         )
     elif action == "delete_user":
-        state.mode = "delete_user"
+        state.mode = None
+        keyboard = _build_delete_user_keyboard(config)
+        if not keyboard.inline_keyboard:
+            await _upsert_message(
+                callback.bot,
+                chat_id,
+                "Нет пользователей для удаления.",
+                _menu_keyboard(is_admin),
+            )
+            state_store.clear_state(chat_id)
+            await callback.answer()
+            return
         await _upsert_message(
             callback.bot,
             chat_id,
-            "Введите username для удаления (без @).",
-            _menu_keyboard(is_admin),
+            "Выберите пользователя для удаления.",
+            keyboard,
         )
     elif action == "admin_config":
         state.mode = "admin_config"
@@ -175,6 +190,24 @@ async def handle_callback(
         await _send_configs(callback.bot, chat_id, config, callback.from_user.username)
         await show_menu(callback.bot, chat_id, is_admin)
         state_store.clear_state(chat_id)
+    elif action and action.startswith("delete_user:"):
+        username = action.split(":", 1)[1]
+        if not username:
+            await callback.answer("Некорректный пользователь.")
+            await show_menu(callback.bot, chat_id, is_admin)
+            state_store.clear_state(chat_id)
+            return
+        try:
+            delete_user(config, username=username)
+        except ValueError as exc:
+            await callback.answer(str(exc))
+            await show_menu(callback.bot, chat_id, is_admin)
+            state_store.clear_state(chat_id)
+            return
+        await callback.answer(f"Пользователь {username} удалён.")
+        await show_menu(callback.bot, chat_id, is_admin)
+        state_store.clear_state(chat_id)
+        return
     await callback.answer()
 
 
@@ -194,8 +227,6 @@ async def handle_text(message: Message, config: BotConfig) -> None:
 
     if state.mode == "add_user":
         await _handle_add_user(message, config)
-    elif state.mode == "delete_user":
-        await _handle_delete_user(message, config)
     elif state.mode == "admin_config":
         await _handle_admin_config(message, config)
     else:
@@ -216,21 +247,6 @@ async def _handle_add_user(message: Message, config: BotConfig) -> None:
     await message.answer(
         f"Пользователь создан. username={username} пароль={password}"
     )
-    await show_menu(message.bot, message.chat.id, True)
-    state_store.clear_state(message.chat.id)
-
-
-async def _handle_delete_user(message: Message, config: BotConfig) -> None:
-    username = _normalize_username(message.text or "")
-    if not username:
-        await message.answer("Введите username (без @).")
-        return
-    try:
-        delete_user(config, username=username)
-    except ValueError as exc:
-        await message.answer(str(exc))
-        return
-    await message.answer(f"Пользователь {username} удалён.")
     await show_menu(message.bot, message.chat.id, True)
     state_store.clear_state(message.chat.id)
 
@@ -297,6 +313,15 @@ def _normalize_username(text: str) -> str | None:
 
 def _generate_password() -> str:
     return secrets.token_urlsafe(12)
+
+
+def _build_delete_user_keyboard(config: BotConfig) -> InlineKeyboardMarkup:
+    usernames = list_users(config)
+    buttons = [
+        [InlineKeyboardButton(text=username, callback_data=f"delete_user:{username}")]
+        for username in usernames
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
 async def _send_error(bot: Bot, chat_id: int, text: str) -> None:
