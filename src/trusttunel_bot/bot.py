@@ -8,6 +8,7 @@ import tempfile
 from aiogram import Bot, Dispatcher, F
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command
 from aiogram.types import (
     CallbackQuery,
@@ -53,6 +54,7 @@ class StateStore:
 
 
 state_store = StateStore()
+USER_LIST_PAGE_SIZE = 10
 
 
 def _is_admin(config: BotConfig, user_id: int) -> bool:
@@ -90,13 +92,16 @@ async def _upsert_message(
 ) -> None:
     message_id = state_store.get_message_id(chat_id)
     if message_id:
-        await bot.edit_message_text(
-            chat_id=chat_id,
-            message_id=message_id,
-            text=text,
-            reply_markup=keyboard,
-        )
-        return
+        try:
+            await bot.edit_message_text(
+                chat_id=chat_id,
+                message_id=message_id,
+                text=text,
+                reply_markup=keyboard,
+            )
+            return
+        except TelegramBadRequest:
+            pass
     message = await bot.send_message(chat_id=chat_id, text=text, reply_markup=keyboard)
     state_store.set_message_id(chat_id, message.message_id)
 
@@ -145,31 +150,10 @@ async def handle_callback(
         )
     elif action == "delete_user":
         state.mode = None
-        keyboard = _build_delete_user_keyboard(config)
-        if not keyboard.inline_keyboard:
-            await _upsert_message(
-                callback.bot,
-                chat_id,
-                "Нет пользователей для удаления.",
-                _menu_keyboard(is_admin),
-            )
-            state_store.clear_state(chat_id)
-            await callback.answer()
-            return
-        await _upsert_message(
-            callback.bot,
-            chat_id,
-            "Выберите пользователя для удаления.",
-            keyboard,
-        )
+        await _show_delete_user_menu(callback.bot, chat_id, config, is_admin, page=1)
     elif action == "admin_config":
-        state.mode = "admin_config"
-        await _upsert_message(
-            callback.bot,
-            chat_id,
-            "Введите username, для которого нужен конфиг.",
-            _menu_keyboard(is_admin),
-        )
+        state.mode = None
+        await _show_admin_config_menu(callback.bot, chat_id, config, is_admin, page=1)
     elif action == "show_rules":
         summary = _load_rules_summary(config)
         await _upsert_message(
@@ -205,6 +189,35 @@ async def handle_callback(
             state_store.clear_state(chat_id)
             return
         await callback.answer(f"Пользователь {username} удалён.")
+        await show_menu(callback.bot, chat_id, is_admin)
+        state_store.clear_state(chat_id)
+        return
+    elif action == "back_to_menu":
+        await show_menu(callback.bot, chat_id, is_admin)
+        state_store.clear_state(chat_id)
+        return
+    elif action and action.startswith("delete_user_page:"):
+        page = _parse_page(action)
+        await _show_delete_user_menu(callback.bot, chat_id, config, is_admin, page=page)
+        return
+    elif action and action.startswith("admin_config_page:"):
+        page = _parse_page(action)
+        await _show_admin_config_menu(callback.bot, chat_id, config, is_admin, page=page)
+        return
+    elif action and action.startswith("admin_config_select:"):
+        username = action.split(":", 1)[1]
+        if not username:
+            await callback.answer("Некорректный пользователь.")
+            await show_menu(callback.bot, chat_id, is_admin)
+            state_store.clear_state(chat_id)
+            return
+        await _upsert_message(
+            callback.bot,
+            chat_id,
+            f"Готовлю конфиг для {username}...",
+            _menu_keyboard(is_admin),
+        )
+        await _send_configs(callback.bot, chat_id, config, username)
         await show_menu(callback.bot, chat_id, is_admin)
         state_store.clear_state(chat_id)
         return
@@ -315,13 +328,122 @@ def _generate_password() -> str:
     return secrets.token_urlsafe(12)
 
 
-def _build_delete_user_keyboard(config: BotConfig) -> InlineKeyboardMarkup:
-    usernames = list_users(config)
+def _build_paginated_user_keyboard(
+    usernames: list[str],
+    *,
+    action_prefix: str,
+    page_prefix: str,
+    page: int,
+    total_pages: int,
+) -> InlineKeyboardMarkup:
     buttons = [
-        [InlineKeyboardButton(text=username, callback_data=f"delete_user:{username}")]
+        [InlineKeyboardButton(text=username, callback_data=f"{action_prefix}:{username}")]
         for username in usernames
     ]
+    navigation: list[InlineKeyboardButton] = []
+    if total_pages > 1:
+        if page > 1:
+            navigation.append(
+                InlineKeyboardButton(
+                    text="⬅️ Назад",
+                    callback_data=f"{page_prefix}:{page - 1}",
+                )
+            )
+        if page < total_pages:
+            navigation.append(
+                InlineKeyboardButton(
+                    text="➡️ Вперёд",
+                    callback_data=f"{page_prefix}:{page + 1}",
+                )
+            )
+    if navigation:
+        buttons.append(navigation)
+    buttons.append([InlineKeyboardButton(text="↩️ В меню", callback_data="back_to_menu")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+def _paginate_usernames(config: BotConfig, page: int) -> tuple[list[str], int, int]:
+    usernames = list_users(config)
+    total = len(usernames)
+    if total == 0:
+        return [], 0, 0
+    total_pages = (total + USER_LIST_PAGE_SIZE - 1) // USER_LIST_PAGE_SIZE
+    page = max(1, min(page, total_pages))
+    start = (page - 1) * USER_LIST_PAGE_SIZE
+    end = start + USER_LIST_PAGE_SIZE
+    return usernames[start:end], page, total_pages
+
+
+async def _show_delete_user_menu(
+    bot: Bot,
+    chat_id: int,
+    config: BotConfig,
+    is_admin: bool,
+    *,
+    page: int,
+) -> None:
+    usernames, current_page, total_pages = _paginate_usernames(config, page)
+    if not usernames:
+        await _upsert_message(
+            bot,
+            chat_id,
+            "Нет пользователей для удаления.",
+            _menu_keyboard(is_admin),
+        )
+        return
+    keyboard = _build_paginated_user_keyboard(
+        usernames,
+        action_prefix="delete_user",
+        page_prefix="delete_user_page",
+        page=current_page,
+        total_pages=total_pages,
+    )
+    await _upsert_message(
+        bot,
+        chat_id,
+        "Выберите пользователя для удаления.",
+        keyboard,
+    )
+
+
+async def _show_admin_config_menu(
+    bot: Bot,
+    chat_id: int,
+    config: BotConfig,
+    is_admin: bool,
+    *,
+    page: int,
+) -> None:
+    usernames, current_page, total_pages = _paginate_usernames(config, page)
+    if not usernames:
+        await _upsert_message(
+            bot,
+            chat_id,
+            "Нет пользователей для выдачи конфига.",
+            _menu_keyboard(is_admin),
+        )
+        return
+    keyboard = _build_paginated_user_keyboard(
+        usernames,
+        action_prefix="admin_config_select",
+        page_prefix="admin_config_page",
+        page=current_page,
+        total_pages=total_pages,
+    )
+    await _upsert_message(
+        bot,
+        chat_id,
+        "Выберите пользователя для выдачи конфига.",
+        keyboard,
+    )
+
+
+def _parse_page(action: str) -> int:
+    page_str = action.split(":", 1)[1] if ":" in action else ""
+    try:
+        return int(page_str)
+    except ValueError:
+        return 1
 
 
 async def _send_error(bot: Bot, chat_id: int, text: str) -> None:
