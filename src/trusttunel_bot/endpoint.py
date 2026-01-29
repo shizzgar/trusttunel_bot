@@ -37,6 +37,7 @@ def generate_endpoint_config(
     output_path: Path | None = None,
 ) -> EndpointConfigResult:
     vpn_config, hosts_config, endpoint_address = _ensure_endpoint_settings(config)
+    _validate_vpn_config_paths(vpn_config)
     result = _run_command_safely(
         [
             "trusttunnel_endpoint",
@@ -48,6 +49,7 @@ def generate_endpoint_config(
             endpoint_address,
         ],
         timeout_s=config.endpoint_command_timeout_s,
+        cwd=vpn_config.parent,
     )
     endpoint_path = output_path or Path(tempfile.gettempdir()) / f"{username}.endpoint.toml"
     endpoint_path.write_text(result.stdout, encoding="utf-8")
@@ -122,13 +124,14 @@ class CommandResult:
     exit_code: int
 
 
-def _run_command_safely(args: list[str], timeout_s: int) -> CommandResult:
+def _run_command_safely(args: list[str], timeout_s: int, cwd: Path | None = None) -> CommandResult:
     completed = subprocess.run(
         args,
         capture_output=True,
         text=True,
         timeout=timeout_s,
         check=False,
+        cwd=str(cwd) if cwd else None,
     )
     if completed.returncode != 0:
         raise RuntimeError(
@@ -146,6 +149,27 @@ def _ensure_endpoint_settings(config: BotConfig) -> tuple[Path, Path, str]:
     if not config.vpn_config or not config.hosts_config or not config.endpoint_public_address:
         raise ValueError("vpn_config, hosts_config, and endpoint_public_address must be set")
     return config.vpn_config, config.hosts_config, config.endpoint_public_address
+
+
+def _validate_vpn_config_paths(vpn_config: Path) -> None:
+    data = tomllib.loads(vpn_config.read_text(encoding="utf-8"))
+    credentials_file = data.get("credentials_file")
+    rules_file = data.get("rules_file")
+    if credentials_file:
+        _ensure_path_exists(vpn_config, credentials_file, "credentials_file")
+    if rules_file:
+        _ensure_path_exists(vpn_config, rules_file, "rules_file")
+
+
+def _ensure_path_exists(vpn_config: Path, value: str, field_name: str) -> None:
+    candidate = Path(value)
+    if not candidate.is_absolute():
+        candidate = vpn_config.parent / candidate
+    if not candidate.exists():
+        raise ValueError(
+            f"{field_name} not found: {candidate}. "
+            "Use an absolute path or place the file next to vpn.toml."
+        )
 
 
 def _get_value(data: dict, keys: list[str], required: bool = True):
