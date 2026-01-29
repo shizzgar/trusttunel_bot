@@ -4,8 +4,6 @@ import asyncio
 from dataclasses import dataclass
 from pathlib import Path
 import secrets
-from typing import Callable
-
 from aiogram import Bot, Dispatcher, F
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
@@ -295,13 +293,22 @@ def _generate_password() -> str:
 
 def build_dispatcher(config: BotConfig) -> Dispatcher:
     dispatcher = Dispatcher()
-    dispatcher.message.register(lambda message: handle_start(message, config), Command("start"))
-    dispatcher.message.register(lambda message: handle_start(message, config), Command("menu"))
-    dispatcher.callback_query.register(lambda callback: handle_callback(callback, config))
-    dispatcher.message.register(
-        lambda message: handle_text(message, config),
-        F.text | F.forward_from | F.forward_sender_name,
-    )
+    async def _start(message: Message) -> None:
+        await handle_start(message, config)
+
+    async def _menu(message: Message) -> None:
+        await handle_start(message, config)
+
+    async def _callback(callback: CallbackQuery) -> None:
+        await handle_callback(callback, config)
+
+    async def _text(message: Message) -> None:
+        await handle_text(message, config)
+
+    dispatcher.message.register(_start, Command("start"))
+    dispatcher.message.register(_menu, Command("menu"))
+    dispatcher.callback_query.register(_callback)
+    dispatcher.message.register(_text, F.text | F.forward_from | F.forward_sender_name)
     return dispatcher
 
 
