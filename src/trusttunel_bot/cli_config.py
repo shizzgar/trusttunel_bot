@@ -3,7 +3,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 import subprocess
-import tomllib
+
+try:
+    import tomllib
+except ModuleNotFoundError:  # pragma: no cover - py<3.11 fallback
+    import tomli as tomllib
+
+from trusttunel_bot.config import BotConfig
 
 from trusttunel_bot.config import BotConfig
 
