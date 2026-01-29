@@ -266,15 +266,14 @@ async def _send_configs(
         return
     await bot.send_document(
         chat_id=chat_id,
-        document=FSInputFile(endpoint.output_path),
-        caption="Endpoint config (для mobile)",
-    )
-    await bot.send_document(
-        chat_id=chat_id,
         document=FSInputFile(client_config.output_path),
         caption="CLI config",
     )
-    await bot.send_message(chat_id=chat_id, text=format_connection_profile(profile))
+    dns_override = ", ".join(config.dns_upstreams) if config.dns_upstreams else None
+    await bot.send_message(
+        chat_id=chat_id,
+        text=format_connection_profile(profile, dns_override=dns_override),
+    )
 
 
 def _extract_username(message: Message) -> str | None:

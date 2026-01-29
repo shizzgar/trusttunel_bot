@@ -99,17 +99,17 @@ def build_connection_profile(
     )
 
 
-def format_connection_profile(profile: ConnectionProfile) -> str:
+def format_connection_profile(profile: ConnectionProfile, dns_override: str | None = None) -> str:
+    dns_value = dns_override or profile.dns
     lines = [
-        "Профиль подключения (копируйте блок ниже):",
-        "",
-        "Server name: " + profile.server_name,
-        "Address: " + profile.address,
-        "Hostname: " + profile.hostname,
-        "Username: " + profile.username,
-        "Password: " + profile.password,
-        "Protocol: " + profile.protocol,
-        "DNS: " + profile.dns,
+        "Профиль подключения (копируйте значения ниже):",
+        f"Server name: `{profile.server_name}`",
+        f"Address: `{profile.address}`",
+        f"Hostname: `{profile.hostname}`",
+        f"Username: `{profile.username}`",
+        f"Password: `{profile.password}`",
+        f"Protocol: `{profile.protocol}`",
+        f"DNS: `{dns_value}`",
     ]
     if profile.self_signed:
         lines.append("⚠️ Сертификат self-signed — Flutter-клиент не подключится.")
