@@ -2,9 +2,13 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
+from datetime import datetime, timezone
+import json
+import logging
 from pathlib import Path
 import secrets
 import tempfile
+
 from aiogram import Bot, Dispatcher, F
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
@@ -16,17 +20,16 @@ from aiogram.types import (
     InlineKeyboardButton,
     InlineKeyboardMarkup,
     Message,
+    User,
 )
 
-from trusttunel_bot.cli_config import generate_client_config_from_bot_config
+from trusttunel_bot.access_management import add_access, delete_access, sync_tt_users_to_telemt
+from trusttunel_bot.bundle import build_user_bundle
 from trusttunel_bot.config import BotConfig, load_config
-from trusttunel_bot.endpoint import (
-    build_connection_profile,
-    format_connection_profile,
-    generate_endpoint_config,
-)
 from trusttunel_bot.rules import format_rules_summary, load_rules
-from trusttunel_bot.user_management import add_user, delete_user, list_users
+from trusttunel_bot.user_management import list_users
+
+LOGGER = logging.getLogger(__name__)
 
 
 @dataclass
@@ -70,16 +73,18 @@ def _menu_keyboard(is_admin: bool) -> InlineKeyboardMarkup:
             [
                 [InlineKeyboardButton(text="➕ Добавить пользователя", callback_data="add_user")],
                 [InlineKeyboardButton(text="➖ Удалить пользователя", callback_data="delete_user")],
-                [InlineKeyboardButton(text="🧾 Получить конфиг", callback_data="admin_config")],
+                [InlineKeyboardButton(text="🧾 Выдать доступ", callback_data="admin_bundle")],
+                [InlineKeyboardButton(text="🔄 Sync TT -> telemt", callback_data="sync_tt_telemt")],
+                [InlineKeyboardButton(text="📣 Отправить сообщение пользователям", callback_data="broadcast_users")],
                 [InlineKeyboardButton(text="📜 Показать rules", callback_data="show_rules")],
             ]
         )
-    buttons.append([InlineKeyboardButton(text="🔑 Мой конфиг", callback_data="my_config")])
+    buttons.append([InlineKeyboardButton(text="🔑 Мой доступ", callback_data="my_access")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
 def _render_menu(is_admin: bool) -> str:
-    header = "Панель управления TrustTunnel"
+    header = "Панель управления TrustTunnel + telemt"
     role = "Администратор" if is_admin else "Пользователь"
     return f"{header}\nРоль: {role}\n\nВыберите действие:"
 
@@ -116,6 +121,7 @@ async def show_menu(bot: Bot, chat_id: int, is_admin: bool) -> None:
 
 
 async def handle_start(message: Message, config: BotConfig) -> None:
+    _remember_chat(config, message.chat.id, message.from_user)
     state_store.clear_state(message.chat.id)
     await show_menu(message.bot, message.chat.id, _is_admin(config, message.from_user.id))
 
@@ -125,12 +131,20 @@ async def handle_callback(
     config: BotConfig,
 ) -> None:
     chat_id = callback.message.chat.id
+    _remember_chat(config, chat_id, callback.from_user)
     user_id = callback.from_user.id
     is_admin = _is_admin(config, user_id)
     state = state_store.get_state(chat_id)
 
     action = callback.data
-    if action in {"add_user", "delete_user", "admin_config", "show_rules"} and not is_admin:
+    if action in {
+        "add_user",
+        "delete_user",
+        "admin_bundle",
+        "sync_tt_telemt",
+        "broadcast_users",
+        "show_rules",
+    } and not is_admin:
         await callback.answer("Недостаточно прав.")
         await show_menu(callback.bot, chat_id, is_admin)
         return
@@ -151,9 +165,38 @@ async def handle_callback(
     elif action == "delete_user":
         state.mode = None
         await _show_delete_user_menu(callback.bot, chat_id, config, is_admin, page=1)
-    elif action == "admin_config":
+    elif action == "admin_bundle":
         state.mode = None
-        await _show_admin_config_menu(callback.bot, chat_id, config, is_admin, page=1)
+        await _show_admin_bundle_menu(callback.bot, chat_id, config, is_admin, page=1)
+    elif action == "sync_tt_telemt":
+        await _upsert_message(
+            callback.bot,
+            chat_id,
+            "Синхронизирую пользователей TrustTunnel в telemt...",
+            _menu_keyboard(is_admin),
+        )
+        try:
+            created = sync_tt_users_to_telemt(config)
+        except RuntimeError as exc:
+            LOGGER.exception("Sync TT -> telemt failed")
+            await _send_error(callback.bot, chat_id, f"Ошибка sync: {exc}")
+        else:
+            await callback.bot.send_message(
+                chat_id=chat_id,
+                text=f"Sync завершён. Создано пользователей в telemt: {len(created)}",
+            )
+        await show_menu(callback.bot, chat_id, is_admin)
+        state_store.clear_state(chat_id)
+        return
+    elif action == "broadcast_users":
+        state.mode = "broadcast_users"
+        await _upsert_message(
+            callback.bot,
+            chat_id,
+            "Отправьте следующим сообщением текст рассылки для всех пользователей бота.",
+            _menu_keyboard(is_admin),
+        )
+        return
     elif action == "show_rules":
         summary = _load_rules_summary(config)
         await _upsert_message(
@@ -163,15 +206,15 @@ async def handle_callback(
             _menu_keyboard(is_admin),
         )
         state_store.clear_state(chat_id)
-    elif action == "my_config":
-        state.mode = "my_config"
+    elif action == "my_access":
+        state.mode = "my_access"
         await _upsert_message(
             callback.bot,
             chat_id,
-            "Подготовка конфигурации...",
+            "Подготовка пакета доступа...",
             _menu_keyboard(is_admin),
         )
-        await _send_configs(callback.bot, chat_id, config, callback.from_user.username)
+        await _send_bundle(callback.bot, chat_id, config, callback.from_user.username)
         await show_menu(callback.bot, chat_id, is_admin)
         state_store.clear_state(chat_id)
     elif action and action.startswith("delete_user:"):
@@ -182,9 +225,14 @@ async def handle_callback(
             state_store.clear_state(chat_id)
             return
         try:
-            delete_user(config, username=username)
+            delete_access(config, username=username)
         except ValueError as exc:
             await callback.answer(str(exc))
+            await show_menu(callback.bot, chat_id, is_admin)
+            state_store.clear_state(chat_id)
+            return
+        except RuntimeError as exc:
+            await _send_error(callback.bot, chat_id, f"Ошибка удаления: {exc}")
             await show_menu(callback.bot, chat_id, is_admin)
             state_store.clear_state(chat_id)
             return
@@ -200,11 +248,11 @@ async def handle_callback(
         page = _parse_page(action)
         await _show_delete_user_menu(callback.bot, chat_id, config, is_admin, page=page)
         return
-    elif action and action.startswith("admin_config_page:"):
+    elif action and action.startswith("admin_bundle_page:"):
         page = _parse_page(action)
-        await _show_admin_config_menu(callback.bot, chat_id, config, is_admin, page=page)
+        await _show_admin_bundle_menu(callback.bot, chat_id, config, is_admin, page=page)
         return
-    elif action and action.startswith("admin_config_select:"):
+    elif action and action.startswith("admin_bundle_select:"):
         username = action.split(":", 1)[1]
         if not username:
             await callback.answer("Некорректный пользователь.")
@@ -214,10 +262,10 @@ async def handle_callback(
         await _upsert_message(
             callback.bot,
             chat_id,
-            f"Готовлю конфиг для {username}...",
+            f"Готовлю доступ для {username}...",
             _menu_keyboard(is_admin),
         )
-        await _send_configs(callback.bot, chat_id, config, username)
+        await _send_bundle(callback.bot, chat_id, config, username)
         await show_menu(callback.bot, chat_id, is_admin)
         state_store.clear_state(chat_id)
         return
@@ -232,6 +280,7 @@ def _load_rules_summary(config: BotConfig) -> str:
 
 
 async def handle_text(message: Message, config: BotConfig) -> None:
+    _remember_chat(config, message.chat.id, message.from_user)
     chat_id = message.chat.id
     state = state_store.get_state(chat_id)
     if not state.mode:
@@ -240,8 +289,10 @@ async def handle_text(message: Message, config: BotConfig) -> None:
 
     if state.mode == "add_user":
         await _handle_add_user(message, config)
-    elif state.mode == "admin_config":
-        await _handle_admin_config(message, config)
+    elif state.mode == "admin_bundle":
+        await _handle_admin_bundle(message, config)
+    elif state.mode == "broadcast_users":
+        await _handle_broadcast_users(message, config)
     else:
         await show_menu(message.bot, chat_id, _is_admin(config, message.from_user.id))
 
@@ -253,28 +304,59 @@ async def _handle_add_user(message: Message, config: BotConfig) -> None:
         return
     password = _generate_password()
     try:
-        add_user(config, username=username, password=password)
+        result = add_access(config, username=username, password=password)
     except ValueError as exc:
         await message.answer(str(exc))
         return
     await message.answer(
-        f"Пользователь создан. username={username} пароль={password}"
+        f"Пользователь создан. username={result.username} пароль={password}"
     )
     await show_menu(message.bot, message.chat.id, True)
     state_store.clear_state(message.chat.id)
 
 
-async def _handle_admin_config(message: Message, config: BotConfig) -> None:
+async def _handle_admin_bundle(message: Message, config: BotConfig) -> None:
     username = _normalize_username(message.text or "")
     if not username:
         await message.answer("Введите username (без @).")
         return
-    await _send_configs(message.bot, message.chat.id, config, username)
+    await _send_bundle(message.bot, message.chat.id, config, username)
     await show_menu(message.bot, message.chat.id, True)
     state_store.clear_state(message.chat.id)
 
 
-async def _send_configs(
+async def _handle_broadcast_users(message: Message, config: BotConfig) -> None:
+    if not _is_admin(config, message.from_user.id):
+        await message.answer("Недостаточно прав.")
+        await show_menu(message.bot, message.chat.id, False)
+        state_store.clear_state(message.chat.id)
+        return
+    text = (message.text or "").strip()
+    if not text:
+        await message.answer("Текст рассылки пуст. Отправьте текстовым сообщением.")
+        return
+    chat_ids = _load_known_chat_ids(config)
+    delivered = 0
+    failed = 0
+    delivered_to: list[str] = []
+    failed_to: list[str] = []
+    for chat_id, entry in chat_ids.items():
+        recipient = _format_recipient(entry)
+        try:
+            await message.bot.send_message(chat_id=chat_id, text=text)
+            delivered += 1
+            delivered_to.append(recipient)
+        except Exception:
+            failed += 1
+            failed_to.append(recipient)
+            LOGGER.exception("Broadcast failed for chat_id=%s", chat_id)
+    report = _build_broadcast_report(delivered_to, failed_to)
+    await message.answer(f"Рассылка завершена.\n{report}")
+    await show_menu(message.bot, message.chat.id, True)
+    state_store.clear_state(message.chat.id)
+
+
+async def _send_bundle(
     bot: Bot,
     chat_id: int,
     config: BotConfig,
@@ -284,24 +366,44 @@ async def _send_configs(
         await bot.send_message(chat_id=chat_id, text="У пользователя нет username.")
         return
     try:
-        endpoint = generate_endpoint_config(config, username=username)
-        client_config = generate_client_config_from_bot_config(
-            config,
-            endpoint_config_path=endpoint.output_path,
-        )
-        profile = build_connection_profile(endpoint.output_path)
+        bundle = build_user_bundle(config, username)
     except (RuntimeError, ValueError) as exc:
+        LOGGER.exception("Bundle generation failed for username=%s", username)
         await _send_error(bot, chat_id, f"Ошибка генерации: {exc}")
         return
-    await bot.send_document(
-        chat_id=chat_id,
-        document=FSInputFile(client_config.output_path),
-        caption="Скачать CLI Клиент можно здесь:\nhttps://github.com/TrustTunnel/TrustTunnelClient/releases/latest",
-    )
-    dns_override = ", ".join(config.dns_upstreams) if config.dns_upstreams else None
-    await bot.send_message(
-        chat_id=chat_id,
-        text="Скачать Мобильный Клиент можно здесь:\nhttps://github.com/TrustTunnel/TrustTunnelFlutterClient/releases/latest\nТам будут ссылки на GooglePlay/AppStore.\nВ случае проблем с загрузкой с GooglePlay качайте apk из релиза непосредственно.\n\n" + format_connection_profile(profile, dns_override=dns_override),
+
+    if bundle.tt_cli_config_path:
+        await bot.send_document(
+            chat_id=chat_id,
+            document=FSInputFile(bundle.tt_cli_config_path),
+            caption="Скачать CLI Клиент можно здесь:\nhttps://github.com/TrustTunnel/TrustTunnelClient/releases/latest",
+        )
+
+    if bundle.tt_mobile_profile_text:
+        await bot.send_message(
+            chat_id=chat_id,
+            text=(
+                "Скачать Мобильный Клиент можно здесь:\n"
+                "https://github.com/TrustTunnel/TrustTunnelFlutterClient/releases/latest\n"
+                "Там будут ссылки на GooglePlay/AppStore.\n"
+                "В случае проблем с загрузкой с GooglePlay качайте apk из релиза непосредственно.\n\n"
+                + bundle.tt_mobile_profile_text
+            ),
+        )
+
+    if config.telemt_enabled:
+        telemt_text = _format_telemt_links(bundle)
+        await bot.send_message(chat_id=chat_id, text=telemt_text)
+
+
+def _format_telemt_links(bundle) -> str:
+    tls_link = bundle.telemt_tls_links[0] if bundle.telemt_tls_links else None
+    if not tls_link:
+        return "Telemt: TLS-ссылка пока недоступна."
+    return (
+        "Telemt (специальный формат прокси только для Telegram):\n"
+        "Достаточно нажать на ссылку ниже — Telegram сам предложит подключение.\n\n"
+        + tls_link
     )
 
 
@@ -311,6 +413,94 @@ def _extract_username(message: Message) -> str | None:
     if message.forward_from and not message.forward_from.username:
         return f"user_{message.forward_from.id}"
     return _normalize_username(message.text or "")
+
+
+def _remember_chat(config: BotConfig, chat_id: int, user: User | None) -> None:
+    chats = _load_known_chat_ids(config)
+    now = datetime.now(timezone.utc).isoformat()
+    existing = chats.get(chat_id, {})
+    chats[chat_id] = {
+        "chat_id": chat_id,
+        "username": user.username if user else existing.get("username"),
+        "first_name": user.first_name if user else existing.get("first_name"),
+        "last_name": user.last_name if user else existing.get("last_name"),
+        "last_seen_utc": now,
+    }
+    _save_known_chat_ids(config, chats)
+
+
+def _load_known_chat_ids(config: BotConfig) -> dict[int, dict]:
+    path = config.known_chats_file
+    if not path.exists():
+        return {}
+    raw = path.read_text(encoding="utf-8").strip()
+    if not raw:
+        return {}
+    try:
+        parsed = json.loads(raw)
+        if isinstance(parsed, list):
+            result: dict[int, dict] = {}
+            for item in parsed:
+                if not isinstance(item, dict):
+                    continue
+                chat_id = item.get("chat_id")
+                if isinstance(chat_id, int):
+                    result[chat_id] = item
+            if result:
+                return result
+    except json.JSONDecodeError:
+        pass
+
+    # Backward compatibility: old plain list (one chat_id per line)
+    result: dict[int, dict] = {}
+    for line in raw.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        try:
+            chat_id = int(stripped)
+            result[chat_id] = {"chat_id": chat_id}
+        except ValueError:
+            continue
+    return result
+
+
+def _save_known_chat_ids(config: BotConfig, chats: dict[int, dict]) -> None:
+    path = config.known_chats_file
+    if path.parent and not path.parent.exists():
+        path.parent.mkdir(parents=True, exist_ok=True)
+    payload = [chats[key] for key in sorted(chats.keys())]
+    path.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+
+def _format_recipient(entry: dict) -> str:
+    username = entry.get("username")
+    chat_id = entry.get("chat_id")
+    if username:
+        return f"@{username} ({chat_id})"
+    return str(chat_id)
+
+
+def _build_broadcast_report(delivered_to: list[str], failed_to: list[str]) -> str:
+    lines = [
+        f"Доставлено: {len(delivered_to)}",
+        f"Ошибок: {len(failed_to)}",
+    ]
+    if delivered_to:
+        lines.append("")
+        lines.append("✅ Доставлено:")
+        lines.extend(delivered_to[:30])
+    if failed_to:
+        lines.append("")
+        lines.append("❌ Не доставлено:")
+        lines.extend(failed_to[:30])
+    if len(delivered_to) > 30 or len(failed_to) > 30:
+        lines.append("")
+        lines.append("Показаны первые 30 записей в каждой группе.")
+    return "\n".join(lines)
 
 
 def _normalize_username(text: str) -> str | None:
@@ -406,7 +596,7 @@ async def _show_delete_user_menu(
     )
 
 
-async def _show_admin_config_menu(
+async def _show_admin_bundle_menu(
     bot: Bot,
     chat_id: int,
     config: BotConfig,
@@ -419,21 +609,21 @@ async def _show_admin_config_menu(
         await _upsert_message(
             bot,
             chat_id,
-            "Нет пользователей для выдачи конфига.",
+            "Нет пользователей для выдачи доступа.",
             _menu_keyboard(is_admin),
         )
         return
     keyboard = _build_paginated_user_keyboard(
         usernames,
-        action_prefix="admin_config_select",
-        page_prefix="admin_config_page",
+        action_prefix="admin_bundle_select",
+        page_prefix="admin_bundle_page",
         page=current_page,
         total_pages=total_pages,
     )
     await _upsert_message(
         bot,
         chat_id,
-        "Выберите пользователя для выдачи конфига.",
+        "Выберите пользователя для выдачи доступа.",
         keyboard,
     )
 
@@ -460,6 +650,7 @@ async def _send_error(bot: Bot, chat_id: int, text: str) -> None:
 
 def build_dispatcher(config: BotConfig) -> Dispatcher:
     dispatcher = Dispatcher()
+
     async def _start(message: Message) -> None:
         await handle_start(message, config)
 
@@ -492,6 +683,10 @@ def _ensure_bot_config(config: BotConfig) -> None:
 
 
 def run_bot() -> None:
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
     config = _load_bot_config()
     _ensure_bot_config(config)
 

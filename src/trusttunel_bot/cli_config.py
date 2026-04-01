@@ -25,10 +25,17 @@ def generate_client_config(
     output_path: Path | None = None,
     prefer_setup_wizard: bool = True,
     dns_upstreams: list[str] | None = None,
+    client_binary: Path | None = None,
+    setup_wizard_binary: Path | None = None,
 ) -> ClientConfigResult:
     output_path = output_path or endpoint_config_path.parent / "trusttunnel_client.toml"
     if prefer_setup_wizard:
-        wizard_result = _try_setup_wizard(endpoint_config_path, output_path)
+        wizard_result = _try_setup_wizard(
+            endpoint_config_path,
+            output_path,
+            client_binary=client_binary,
+            setup_wizard_binary=setup_wizard_binary,
+        )
         if wizard_result:
             if dns_upstreams:
                 content = _merge_dns_upstreams(
@@ -67,17 +74,20 @@ def generate_client_config_from_bot_config(
         output_path=output_path,
         prefer_setup_wizard=prefer_setup_wizard,
         dns_upstreams=config.dns_upstreams,
+        client_binary=config.trusttunnel_client_binary,
+        setup_wizard_binary=config.trusttunnel_setup_wizard_binary,
     )
 
 
 def _try_setup_wizard(
     endpoint_config_path: Path,
     output_path: Path,
+    client_binary: Path | None = None,
+    setup_wizard_binary: Path | None = None,
 ) -> ClientConfigResult | None:
     completed = subprocess.run(
         [
-            "trusttunnel_client",
-            "setup_wizard",
+            _resolve_setup_wizard_binary(client_binary, setup_wizard_binary),
             "--mode",
             "non-interactive",
             "--endpoint_config",
@@ -98,6 +108,18 @@ def _try_setup_wizard(
         used_setup_wizard=True,
         skip_verification=False,
     )
+
+
+def _resolve_setup_wizard_binary(
+    client_binary: Path | None,
+    setup_wizard_binary: Path | None,
+) -> str:
+    if setup_wizard_binary:
+        return str(setup_wizard_binary)
+    if client_binary:
+        candidate = client_binary.parent / "setup_wizard"
+        return str(candidate)
+    return "setup_wizard"
 
 
 def _build_client_config_from_endpoint(
@@ -130,13 +152,13 @@ def _build_client_config_from_endpoint(
             "Endpoint config is missing required fields: " + ", ".join(sorted(missing))
         )
     skip_verification = False
-    
+
     lines: list[str] = ["vpn_mode = \"general\""]
-    lines.append(f"killswitch_enabled = true")
+    lines.append("killswitch_enabled = true")
 
     if dns_upstreams:
         lines.append(f"dns_upstreams = {_format_list(dns_upstreams)}")
-    lines.append(f"[endpoint]")
+    lines.append("[endpoint]")
     lines.append(f"hostname = \"{_escape(str(hostname))}\"")
     lines.append(f"addresses = {_format_list(addresses)}")
     if has_ipv6 is not None:
@@ -156,8 +178,8 @@ def _build_client_config_from_endpoint(
     lines.append("[listener]")
     lines.append("[listener.tun]")
     lines.append("bound_if = \"\"")
-    lines.append("included_routes = [\"0.0.0.0/0\", \"2000::/3\", \"10.3.2.1/32\"]")
-    lines.append("excluded_routes = [\"0.0.0.0/8\", \"169.254.0.0/16\", \"172.16.0.0/12\", \"192.168.0.0/16\", \"224.0.0.0/3\"]")
+    lines.append('included_routes = ["0.0.0.0/0", "2000::/3", "10.3.2.1/32"]')
+    lines.append('excluded_routes = ["0.0.0.0/8", "169.254.0.0/16", "172.16.0.0/12", "192.168.0.0/16", "224.0.0.0/3"]')
     lines.append("mtu_size = 1500")
     lines.append("change_system_dns = true")
     content = "\n".join(lines).rstrip() + "\n"
