@@ -273,7 +273,11 @@ def _get_value(data: dict, keys: list[str], required: bool = True):
 
 def _pick_address(addresses) -> str:
     raw_address = str(addresses[0]) if isinstance(addresses, list) and addresses else str(addresses)
-    return _extract_public_ip(raw_address)
+    public_ip = _extract_public_ip(raw_address)
+    port = _extract_port(raw_address)
+    if public_ip and port:
+        return f"{public_ip}:{port}"
+    return public_ip
 
 
 def _extract_public_ip(address: str) -> str:
@@ -300,6 +304,13 @@ def _extract_public_ip(address: str) -> str:
             pass
 
     return value
+
+
+def _extract_port(value: str) -> str | None:
+    match = re.match(r"^[^:]+:(?P<port>\d+)$", value)
+    if match:
+        return match.group("port")
+    return None
 
 
 def _extract_host(value: str) -> str | None:
