@@ -145,10 +145,20 @@ def _generate_secret() -> str:
 
 def _unwrap_payload(payload):
     if isinstance(payload, dict):
-        for key in ("user", "data", "result"):
-            value = payload.get(key)
-            if isinstance(value, dict) and value.get("username"):
-                return value
+        if isinstance(payload.get("user"), dict):
+            return payload["user"]
+        data = payload.get("data")
+        if isinstance(data, dict):
+            if isinstance(data.get("user"), dict):
+                return data["user"]
+            if data.get("username"):
+                return data
+        result = payload.get("result")
+        if isinstance(result, dict):
+            if isinstance(result.get("user"), dict):
+                return result["user"]
+            if result.get("username"):
+                return result
     return payload
 
 
