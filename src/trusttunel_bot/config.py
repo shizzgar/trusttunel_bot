@@ -14,6 +14,7 @@ class BotConfig:
     credentials_file: Path
     telegram_token: str | None = None
     admin_ids: list[int] | None = None
+    known_chats_file: Path = Path("known_chats.txt")
     reload_endpoint: str | None = None
     vpn_config: Path | None = None
     hosts_config: Path | None = None
@@ -43,6 +44,7 @@ def load_config(path: Path) -> BotConfig:
         raise ValueError("credentials_file is required in bot config")
     telegram_token = data.get("telegram_token")
     admin_ids = _ensure_int_list(data.get("admin_ids"))
+    known_chats_file = data.get("known_chats_file")
     reload_endpoint = data.get("reload_endpoint")
     vpn_config = data.get("vpn_config")
     hosts_config = data.get("hosts_config")
@@ -70,6 +72,7 @@ def load_config(path: Path) -> BotConfig:
         credentials_file=Path(credentials_file),
         telegram_token=str(telegram_token) if telegram_token else None,
         admin_ids=admin_ids,
+        known_chats_file=Path(known_chats_file) if known_chats_file else Path("known_chats.txt"),
         reload_endpoint=reload_endpoint,
         vpn_config=Path(vpn_config) if vpn_config else None,
         hosts_config=Path(hosts_config) if hosts_config else None,
