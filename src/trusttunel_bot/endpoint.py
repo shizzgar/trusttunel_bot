@@ -47,6 +47,8 @@ def generate_endpoint_config(
             username,
             "-a",
             endpoint_address,
+            "--format",
+            "toml",
         ],
         timeout_s=config.endpoint_command_timeout_s,
         cwd=vpn_config.parent,
@@ -55,6 +57,28 @@ def generate_endpoint_config(
     endpoint_path = output_path or Path(tempfile.gettempdir()) / f"{username}.endpoint.toml"
     endpoint_path.write_text(toml_content, encoding="utf-8")
     return EndpointConfigResult(output_path=endpoint_path, content=toml_content)
+
+
+def generate_endpoint_deeplink(config: BotConfig, username: str) -> str | None:
+    vpn_config, hosts_config, endpoint_address = _ensure_endpoint_settings(config)
+    _validate_vpn_config_paths(vpn_config)
+    result = _run_command_safely(
+        [
+            _resolve_endpoint_binary(config),
+            str(vpn_config),
+            str(hosts_config),
+            "-c",
+            username,
+            "-a",
+            endpoint_address,
+            "--format",
+            "deeplink",
+        ],
+        timeout_s=config.endpoint_command_timeout_s,
+        cwd=vpn_config.parent,
+    )
+    tt_uri, _ = _extract_tt_uri_and_qr(result.stdout)
+    return tt_uri
 
 
 def build_connection_profile(

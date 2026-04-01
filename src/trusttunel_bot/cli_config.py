@@ -26,6 +26,7 @@ def generate_client_config(
     prefer_setup_wizard: bool = True,
     dns_upstreams: list[str] | None = None,
     client_binary: Path | None = None,
+    setup_wizard_binary: Path | None = None,
 ) -> ClientConfigResult:
     output_path = output_path or endpoint_config_path.parent / "trusttunnel_client.toml"
     if prefer_setup_wizard:
@@ -33,6 +34,7 @@ def generate_client_config(
             endpoint_config_path,
             output_path,
             client_binary=client_binary,
+            setup_wizard_binary=setup_wizard_binary,
         )
         if wizard_result:
             if dns_upstreams:
@@ -73,6 +75,7 @@ def generate_client_config_from_bot_config(
         prefer_setup_wizard=prefer_setup_wizard,
         dns_upstreams=config.dns_upstreams,
         client_binary=config.trusttunnel_client_binary,
+        setup_wizard_binary=config.trusttunnel_setup_wizard_binary,
     )
 
 
@@ -80,11 +83,11 @@ def _try_setup_wizard(
     endpoint_config_path: Path,
     output_path: Path,
     client_binary: Path | None = None,
+    setup_wizard_binary: Path | None = None,
 ) -> ClientConfigResult | None:
     completed = subprocess.run(
         [
-            _resolve_client_binary(client_binary),
-            "setup_wizard",
+            _resolve_setup_wizard_binary(client_binary, setup_wizard_binary),
             "--mode",
             "non-interactive",
             "--endpoint_config",
@@ -107,10 +110,16 @@ def _try_setup_wizard(
     )
 
 
-def _resolve_client_binary(client_binary: Path | None) -> str:
+def _resolve_setup_wizard_binary(
+    client_binary: Path | None,
+    setup_wizard_binary: Path | None,
+) -> str:
+    if setup_wizard_binary:
+        return str(setup_wizard_binary)
     if client_binary:
-        return str(client_binary)
-    return "trusttunnel_client"
+        candidate = client_binary.parent / "setup_wizard"
+        return str(candidate)
+    return "setup_wizard"
 
 
 def _build_client_config_from_endpoint(

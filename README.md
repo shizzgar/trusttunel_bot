@@ -51,6 +51,7 @@ endpoint_command_timeout_s = 10
 trusttunnel_service_name = "trusttunnel"
 trusttunnel_endpoint_binary = "/opt/trusttunnel-current/trusttunnel_endpoint"
 trusttunnel_client_binary = "/opt/trusttunnel_client/trusttunnel_client"
+trusttunnel_setup_wizard_binary = "/opt/trusttunnel_client/setup_wizard"
 
 # telemt
 telemt_enabled = true
