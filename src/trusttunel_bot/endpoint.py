@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+import ipaddress
+import re
+import socket
 import subprocess
 import tempfile
 
@@ -269,9 +272,77 @@ def _get_value(data: dict, keys: list[str], required: bool = True):
 
 
 def _pick_address(addresses) -> str:
-    if isinstance(addresses, list):
-        return str(addresses[0]) if addresses else ""
-    return str(addresses)
+    raw_address = str(addresses[0]) if isinstance(addresses, list) and addresses else str(addresses)
+    public_ip = _extract_public_ip(raw_address)
+    port = _extract_port(raw_address)
+    if public_ip and port:
+        return f"{public_ip}:{port}"
+    return public_ip
+
+
+def _extract_public_ip(address: str) -> str:
+    value = (address or "").strip()
+    if not value:
+        return ""
+
+    sslip_match = re.match(r"^(?P<host>(?:\d{1,3}-){3}\d{1,3})\.sslip\.io(?::\d+)?$", value)
+    if sslip_match:
+        return sslip_match.group("host").replace("-", ".")
+
+    host = _extract_host(value)
+    if host and _is_ipv4(host):
+        return host
+
+    default_ip = _detect_default_interface_ipv4()
+    if default_ip:
+        return default_ip
+
+    if host:
+        try:
+            return socket.gethostbyname(host)
+        except OSError:
+            pass
+
+    return value
+
+
+def _extract_port(value: str) -> str | None:
+    match = re.match(r"^[^:]+:(?P<port>\d+)$", value)
+    if match:
+        return match.group("port")
+    return None
+
+
+def _extract_host(value: str) -> str | None:
+    ipv4_port_match = re.match(r"^(?P<host>(?:\d{1,3}\.){3}\d{1,3}):\d+$", value)
+    if ipv4_port_match:
+        return ipv4_port_match.group("host")
+
+    host_port_match = re.match(r"^(?P<host>[A-Za-z0-9.-]+):\d+$", value)
+    if host_port_match:
+        return host_port_match.group("host")
+
+    return value if value else None
+
+
+def _is_ipv4(value: str) -> bool:
+    try:
+        return isinstance(ipaddress.ip_address(value), ipaddress.IPv4Address)
+    except ValueError:
+        return False
+
+
+def _detect_default_interface_ipv4() -> str | None:
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        sock.connect(("8.8.8.8", 80))
+        detected = sock.getsockname()[0]
+    except OSError:
+        return None
+    finally:
+        sock.close()
+
+    return detected if _is_ipv4(detected) else None
 
 
 def _format_dns(dns) -> str:
