@@ -51,9 +51,10 @@ def generate_endpoint_config(
         timeout_s=config.endpoint_command_timeout_s,
         cwd=vpn_config.parent,
     )
+    toml_content = _normalize_endpoint_toml(result.stdout)
     endpoint_path = output_path or Path(tempfile.gettempdir()) / f"{username}.endpoint.toml"
-    endpoint_path.write_text(result.stdout, encoding="utf-8")
-    return EndpointConfigResult(output_path=endpoint_path, content=result.stdout)
+    endpoint_path.write_text(toml_content, encoding="utf-8")
+    return EndpointConfigResult(output_path=endpoint_path, content=toml_content)
 
 
 def build_connection_profile(
@@ -143,6 +144,34 @@ def _run_command_safely(args: list[str], timeout_s: int, cwd: Path | None = None
         stderr=completed.stderr,
         exit_code=completed.returncode,
     )
+
+
+def _normalize_endpoint_toml(raw_output: str) -> str:
+    normalized = raw_output.strip()
+    if not normalized:
+        raise RuntimeError("trusttunnel_endpoint returned empty output")
+    if _is_valid_toml(normalized):
+        return normalized + "\n"
+
+    lines = normalized.splitlines()
+    for index, _line in enumerate(lines):
+        candidate = "\n".join(lines[index:]).strip()
+        if candidate and _is_valid_toml(candidate):
+            return candidate + "\n"
+
+    preview = normalized[:400]
+    raise RuntimeError(
+        "trusttunnel_endpoint did not return TOML output. "
+        f"Output preview: {preview}"
+    )
+
+
+def _is_valid_toml(text: str) -> bool:
+    try:
+        tomllib.loads(text)
+        return True
+    except Exception:
+        return False
 
 
 def _resolve_endpoint_binary(config: BotConfig) -> str:
