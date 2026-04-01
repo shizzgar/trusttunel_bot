@@ -40,7 +40,7 @@ def generate_endpoint_config(
     _validate_vpn_config_paths(vpn_config)
     result = _run_command_safely(
         [
-            "trusttunnel_endpoint",
+            _resolve_endpoint_binary(config),
             str(vpn_config),
             str(hosts_config),
             "-c",
@@ -143,6 +143,12 @@ def _run_command_safely(args: list[str], timeout_s: int, cwd: Path | None = None
         stderr=completed.stderr,
         exit_code=completed.returncode,
     )
+
+
+def _resolve_endpoint_binary(config: BotConfig) -> str:
+    if config.trusttunnel_endpoint_binary:
+        return str(config.trusttunnel_endpoint_binary)
+    return "trusttunnel_endpoint"
 
 
 def _ensure_endpoint_settings(config: BotConfig) -> tuple[Path, Path, str]:
