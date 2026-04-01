@@ -341,20 +341,14 @@ async def _send_bundle(
 
 
 def _format_telemt_links(bundle) -> str:
-    sections: list[str] = ["telemt-ссылки:"]
-    sections.extend(_render_links_group("TLS", bundle.telemt_tls_links))
-    sections.extend(_render_links_group("Classic", bundle.telemt_classic_links))
-    sections.extend(_render_links_group("Secure", bundle.telemt_secure_links))
-    return "\n".join(sections)
-
-
-def _render_links_group(title: str, links: list[str]) -> list[str]:
-    if not links:
-        return [f"\n{title}: нет ссылок."]
-    result = [f"\n{title}:"]
-    for link in links:
-        result.append(link)
-    return result
+    tls_link = bundle.telemt_tls_links[0] if bundle.telemt_tls_links else None
+    if not tls_link:
+        return "Telemt: TLS-ссылка пока недоступна."
+    return (
+        "Telemt (специальный формат прокси только для Telegram):\n"
+        "Достаточно нажать на ссылку ниже — Telegram сам предложит подключение.\n\n"
+        f"<pre>{tls_link}</pre>"
+    )
 
 
 def _extract_username(message: Message) -> str | None:

@@ -24,6 +24,7 @@ class BotConfig:
     trusttunnel_service_name: str = "trusttunnel"
     trusttunnel_endpoint_binary: Path = Path("/opt/trusttunnel-current/trusttunnel_endpoint")
     trusttunnel_client_binary: Path = Path("/opt/trusttunnel_client/trusttunnel_client")
+    trusttunnel_setup_wizard_binary: Path = Path("/opt/trusttunnel_client/setup_wizard")
     telemt_enabled: bool = False
     telemt_api_base_url: str | None = None
     telemt_api_auth_header: str | None = None
@@ -53,6 +54,7 @@ def load_config(path: Path) -> BotConfig:
     trusttunnel_service_name = str(data.get("trusttunnel_service_name") or "trusttunnel")
     trusttunnel_endpoint_binary = data.get("trusttunnel_endpoint_binary")
     trusttunnel_client_binary = data.get("trusttunnel_client_binary")
+    trusttunnel_setup_wizard_binary = data.get("trusttunnel_setup_wizard_binary")
 
     telemt_enabled = bool(data.get("telemt_enabled", False))
     telemt_api_base_url = data.get("telemt_api_base_url")
@@ -82,6 +84,9 @@ def load_config(path: Path) -> BotConfig:
         trusttunnel_client_binary=Path(trusttunnel_client_binary)
         if trusttunnel_client_binary
         else Path("/opt/trusttunnel_client/trusttunnel_client"),
+        trusttunnel_setup_wizard_binary=Path(trusttunnel_setup_wizard_binary)
+        if trusttunnel_setup_wizard_binary
+        else Path("/opt/trusttunnel_client/setup_wizard"),
         telemt_enabled=telemt_enabled,
         telemt_api_base_url=str(telemt_api_base_url) if telemt_api_base_url else None,
         telemt_api_auth_header=str(telemt_api_auth_header) if telemt_api_auth_header else None,
