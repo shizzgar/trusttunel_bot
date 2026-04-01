@@ -1,0 +1,26 @@
+telegram_token = "123456:ABCDEF"
+admin_ids = [123456789]
+
+# TrustTunnel
+credentials_file = "/opt/trusttunnel/credentials.toml"
+vpn_config = "/opt/trusttunnel/vpn-ha.toml"
+hosts_config = "/opt/trusttunnel/hosts.toml"
+endpoint_public_address = "xx-xx-xx-xx.sslip.io:443"
+dns_upstreams = ["10.3.2.1:53"]
+rules_file = "/opt/trusttunnel/rules.toml"
+reload_endpoint = ""
+endpoint_command_timeout_s = 10
+trusttunnel_service_name = "trusttunnel"
+trusttunnel_endpoint_binary = "/opt/trusttunnel-current/trusttunnel_endpoint"
+trusttunnel_client_binary = "/opt/trusttunnel_client/trusttunnel_client"
+
+# telemt
+telemt_enabled = true
+telemt_api_base_url = "http://127.0.0.1:9091"
+telemt_api_auth_header = ""
+telemt_service_name = "telemt"
+telemt_public_host = "tm.xx-xx-xx-xx.sslip.io"
+telemt_public_port = 443
+telemt_tls_domain = "tm.xx-xx-xx-xx.sslip.io"
+telemt_lazy_create = true
+telemt_sync_on_add = true
