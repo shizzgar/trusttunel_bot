@@ -37,12 +37,9 @@ def list_telemt_users(config: BotConfig) -> list[TelemtUser]:
 
 
 def get_telemt_user(config: BotConfig, username: str) -> TelemtUser | None:
-    try:
-        payload = _request_json(config, "GET", f"/v1/users/{username}")
-    except TelemtAPIError as exc:
-        if "HTTP 404" in str(exc):
-            return None
-        raise
+    payload = _request_json(config, "GET", f"/v1/users/{username}", not_found_ok=True)
+    if payload is None:
+        return None
     return _parse_user(payload)
 
 
@@ -82,6 +79,7 @@ def _request_json(
     method: str,
     path: str,
     body: dict | None = None,
+    not_found_ok: bool = False,
 ):
     base = (config.telemt_api_base_url or "").rstrip("/")
     if not base:
@@ -103,6 +101,8 @@ def _request_json(
                 return None
             return json.loads(text)
     except error.HTTPError as exc:
+        if not_found_ok and exc.code == 404:
+            return None
         details = exc.read().decode("utf-8", errors="replace")
         LOGGER.error(
             "telemt API HTTP error: method=%s url=%s status=%s body=%s",

@@ -153,6 +153,16 @@ def _normalize_endpoint_toml(raw_output: str) -> str:
     if _is_valid_toml(normalized):
         return normalized + "\n"
 
+    tt_uri, qr_url = _extract_tt_uri_and_qr(normalized)
+    if tt_uri:
+        lines = [
+            "# Auto-converted from TrustTunnel URI output",
+            f'tt_uri = "{tt_uri}"',
+        ]
+        if qr_url:
+            lines.append(f'qr_url = "{qr_url}"')
+        return "\n".join(lines) + "\n"
+
     lines = normalized.splitlines()
     for index, _line in enumerate(lines):
         candidate = "\n".join(lines[index:]).strip()
@@ -172,6 +182,18 @@ def _is_valid_toml(text: str) -> bool:
         return True
     except Exception:
         return False
+
+
+def _extract_tt_uri_and_qr(text: str) -> tuple[str | None, str | None]:
+    tt_uri: str | None = None
+    qr_url: str | None = None
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("tt://"):
+            tt_uri = stripped
+        if "https://trusttunnel.org/qr.html#tt=" in stripped:
+            qr_url = stripped
+    return tt_uri, qr_url
 
 
 def _resolve_endpoint_binary(config: BotConfig) -> str:
