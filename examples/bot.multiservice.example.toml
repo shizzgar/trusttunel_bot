@@ -1,5 +1,6 @@
 telegram_token = "123456:ABCDEF"
 admin_ids = [123456789]
+known_chats_file = "/opt/trusttunnel/trusttunel_bot/known_chats.txt"
 
 # TrustTunnel
 credentials_file = "/opt/trusttunnel/credentials.toml"

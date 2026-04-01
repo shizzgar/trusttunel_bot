@@ -38,6 +38,7 @@
 ```toml
 telegram_token = "123456:ABCDEF"
 admin_ids = [123456789]
+known_chats_file = "/opt/trusttunnel/trusttunel_bot/known_chats.txt"
 
 # TrustTunnel
 credentials_file = "/opt/trusttunnel/credentials.toml"
@@ -87,6 +88,7 @@ telemt_sync_on_add = true
 - ➖ Удалить пользователя
 - 🧾 Выдать доступ
 - 🔄 Sync TT -> telemt
+- 📣 Отправить сообщение пользователям
 - 📜 Показать rules
 
 Пользователь:

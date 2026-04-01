@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
+from datetime import datetime, timezone
+import json
 import logging
 from pathlib import Path
 import secrets
@@ -18,6 +20,7 @@ from aiogram.types import (
     InlineKeyboardButton,
     InlineKeyboardMarkup,
     Message,
+    User,
 )
 
 from trusttunel_bot.access_management import add_access, delete_access, sync_tt_users_to_telemt
@@ -72,6 +75,7 @@ def _menu_keyboard(is_admin: bool) -> InlineKeyboardMarkup:
                 [InlineKeyboardButton(text="➖ Удалить пользователя", callback_data="delete_user")],
                 [InlineKeyboardButton(text="🧾 Выдать доступ", callback_data="admin_bundle")],
                 [InlineKeyboardButton(text="🔄 Sync TT -> telemt", callback_data="sync_tt_telemt")],
+                [InlineKeyboardButton(text="📣 Отправить сообщение пользователям", callback_data="broadcast_users")],
                 [InlineKeyboardButton(text="📜 Показать rules", callback_data="show_rules")],
             ]
         )
@@ -117,6 +121,7 @@ async def show_menu(bot: Bot, chat_id: int, is_admin: bool) -> None:
 
 
 async def handle_start(message: Message, config: BotConfig) -> None:
+    _remember_chat(config, message.chat.id, message.from_user)
     state_store.clear_state(message.chat.id)
     await show_menu(message.bot, message.chat.id, _is_admin(config, message.from_user.id))
 
@@ -126,12 +131,20 @@ async def handle_callback(
     config: BotConfig,
 ) -> None:
     chat_id = callback.message.chat.id
+    _remember_chat(config, chat_id, callback.from_user)
     user_id = callback.from_user.id
     is_admin = _is_admin(config, user_id)
     state = state_store.get_state(chat_id)
 
     action = callback.data
-    if action in {"add_user", "delete_user", "admin_bundle", "sync_tt_telemt", "show_rules"} and not is_admin:
+    if action in {
+        "add_user",
+        "delete_user",
+        "admin_bundle",
+        "sync_tt_telemt",
+        "broadcast_users",
+        "show_rules",
+    } and not is_admin:
         await callback.answer("Недостаточно прав.")
         await show_menu(callback.bot, chat_id, is_admin)
         return
@@ -174,6 +187,15 @@ async def handle_callback(
             )
         await show_menu(callback.bot, chat_id, is_admin)
         state_store.clear_state(chat_id)
+        return
+    elif action == "broadcast_users":
+        state.mode = "broadcast_users"
+        await _upsert_message(
+            callback.bot,
+            chat_id,
+            "Отправьте следующим сообщением текст рассылки для всех пользователей бота.",
+            _menu_keyboard(is_admin),
+        )
         return
     elif action == "show_rules":
         summary = _load_rules_summary(config)
@@ -258,6 +280,7 @@ def _load_rules_summary(config: BotConfig) -> str:
 
 
 async def handle_text(message: Message, config: BotConfig) -> None:
+    _remember_chat(config, message.chat.id, message.from_user)
     chat_id = message.chat.id
     state = state_store.get_state(chat_id)
     if not state.mode:
@@ -268,6 +291,8 @@ async def handle_text(message: Message, config: BotConfig) -> None:
         await _handle_add_user(message, config)
     elif state.mode == "admin_bundle":
         await _handle_admin_bundle(message, config)
+    elif state.mode == "broadcast_users":
+        await _handle_broadcast_users(message, config)
     else:
         await show_menu(message.bot, chat_id, _is_admin(config, message.from_user.id))
 
@@ -296,6 +321,37 @@ async def _handle_admin_bundle(message: Message, config: BotConfig) -> None:
         await message.answer("Введите username (без @).")
         return
     await _send_bundle(message.bot, message.chat.id, config, username)
+    await show_menu(message.bot, message.chat.id, True)
+    state_store.clear_state(message.chat.id)
+
+
+async def _handle_broadcast_users(message: Message, config: BotConfig) -> None:
+    if not _is_admin(config, message.from_user.id):
+        await message.answer("Недостаточно прав.")
+        await show_menu(message.bot, message.chat.id, False)
+        state_store.clear_state(message.chat.id)
+        return
+    text = (message.text or "").strip()
+    if not text:
+        await message.answer("Текст рассылки пуст. Отправьте текстовым сообщением.")
+        return
+    chat_ids = _load_known_chat_ids(config)
+    delivered = 0
+    failed = 0
+    delivered_to: list[str] = []
+    failed_to: list[str] = []
+    for chat_id, entry in chat_ids.items():
+        recipient = _format_recipient(entry)
+        try:
+            await message.bot.send_message(chat_id=chat_id, text=text)
+            delivered += 1
+            delivered_to.append(recipient)
+        except Exception:
+            failed += 1
+            failed_to.append(recipient)
+            LOGGER.exception("Broadcast failed for chat_id=%s", chat_id)
+    report = _build_broadcast_report(delivered_to, failed_to)
+    await message.answer(f"Рассылка завершена.\n{report}")
     await show_menu(message.bot, message.chat.id, True)
     state_store.clear_state(message.chat.id)
 
@@ -357,6 +413,94 @@ def _extract_username(message: Message) -> str | None:
     if message.forward_from and not message.forward_from.username:
         return f"user_{message.forward_from.id}"
     return _normalize_username(message.text or "")
+
+
+def _remember_chat(config: BotConfig, chat_id: int, user: User | None) -> None:
+    chats = _load_known_chat_ids(config)
+    now = datetime.now(timezone.utc).isoformat()
+    existing = chats.get(chat_id, {})
+    chats[chat_id] = {
+        "chat_id": chat_id,
+        "username": user.username if user else existing.get("username"),
+        "first_name": user.first_name if user else existing.get("first_name"),
+        "last_name": user.last_name if user else existing.get("last_name"),
+        "last_seen_utc": now,
+    }
+    _save_known_chat_ids(config, chats)
+
+
+def _load_known_chat_ids(config: BotConfig) -> dict[int, dict]:
+    path = config.known_chats_file
+    if not path.exists():
+        return {}
+    raw = path.read_text(encoding="utf-8").strip()
+    if not raw:
+        return {}
+    try:
+        parsed = json.loads(raw)
+        if isinstance(parsed, list):
+            result: dict[int, dict] = {}
+            for item in parsed:
+                if not isinstance(item, dict):
+                    continue
+                chat_id = item.get("chat_id")
+                if isinstance(chat_id, int):
+                    result[chat_id] = item
+            if result:
+                return result
+    except json.JSONDecodeError:
+        pass
+
+    # Backward compatibility: old plain list (one chat_id per line)
+    result: dict[int, dict] = {}
+    for line in raw.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        try:
+            chat_id = int(stripped)
+            result[chat_id] = {"chat_id": chat_id}
+        except ValueError:
+            continue
+    return result
+
+
+def _save_known_chat_ids(config: BotConfig, chats: dict[int, dict]) -> None:
+    path = config.known_chats_file
+    if path.parent and not path.parent.exists():
+        path.parent.mkdir(parents=True, exist_ok=True)
+    payload = [chats[key] for key in sorted(chats.keys())]
+    path.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+
+def _format_recipient(entry: dict) -> str:
+    username = entry.get("username")
+    chat_id = entry.get("chat_id")
+    if username:
+        return f"@{username} ({chat_id})"
+    return str(chat_id)
+
+
+def _build_broadcast_report(delivered_to: list[str], failed_to: list[str]) -> str:
+    lines = [
+        f"Доставлено: {len(delivered_to)}",
+        f"Ошибок: {len(failed_to)}",
+    ]
+    if delivered_to:
+        lines.append("")
+        lines.append("✅ Доставлено:")
+        lines.extend(delivered_to[:30])
+    if failed_to:
+        lines.append("")
+        lines.append("❌ Не доставлено:")
+        lines.extend(failed_to[:30])
+    if len(delivered_to) > 30 or len(failed_to) > 30:
+        lines.append("")
+        lines.append("Показаны первые 30 записей в каждой группе.")
+    return "\n".join(lines)
 
 
 def _normalize_username(text: str) -> str | None:
