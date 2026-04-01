@@ -5,7 +5,7 @@ from pathlib import Path
 
 from trusttunel_bot.config import BotConfig
 from trusttunel_bot.credentials import ClientCredential, load_credentials, save_credentials
-from trusttunel_bot.service import reload_credentials
+from trusttunel_bot.service import reload_trusttunnel
 
 
 @dataclass(frozen=True)
@@ -25,7 +25,9 @@ def add_user(config: BotConfig, username: str, password: str) -> UserChangeResul
         raise ValueError(f"User '{username}' already exists")
     credentials.append(ClientCredential(username=username, password=password))
     save_credentials(config.credentials_file, credentials)
-    result = reload_credentials(config.reload_endpoint)
+    result = reload_trusttunnel(config)
+    if not result.ok:
+        raise RuntimeError(f"Failed to reload TrustTunnel: {result.message or 'unknown error'}")
     return UserChangeResult(updated_path=config.credentials_file, used_hot_reload=result.used_hot_reload)
 
 
@@ -35,5 +37,7 @@ def delete_user(config: BotConfig, username: str) -> UserChangeResult:
     if len(remaining) == len(credentials):
         raise ValueError(f"User '{username}' not found")
     save_credentials(config.credentials_file, remaining)
-    result = reload_credentials(config.reload_endpoint)
+    result = reload_trusttunnel(config)
+    if not result.ok:
+        raise RuntimeError(f"Failed to reload TrustTunnel: {result.message or 'unknown error'}")
     return UserChangeResult(updated_path=config.credentials_file, used_hot_reload=result.used_hot_reload)
