@@ -347,7 +347,7 @@ def _format_telemt_links(bundle) -> str:
     return (
         "Telemt (специальный формат прокси только для Telegram):\n"
         "Достаточно нажать на ссылку ниже — Telegram сам предложит подключение.\n\n"
-        f"<pre>{tls_link}</pre>"
+        + tls_link
     )
 
 

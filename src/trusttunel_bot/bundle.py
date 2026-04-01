@@ -83,10 +83,10 @@ def _build_tt_uri_fallback_text(endpoint_config_path: Path) -> str:
     lines = [
         "TrustTunnel использует новый URI-формат подключения.",
         "Скопируйте ссылку ниже в клиент:",
-        f"<pre>{tt_uri}</pre>",
+        tt_uri,
     ]
     if qr_url:
-        lines.append(f"QR page: <pre>{qr_url}</pre>")
+        lines.append(f"QR page: {qr_url}")
     return "\n".join(lines)
 
 
@@ -113,10 +113,10 @@ def _build_combined_mobile_text(
 
     lines = [
         "Новый формат (deeplink):",
-        f"<pre>{tt_uri}</pre>",
+        tt_uri,
     ]
     if qr_url:
-        lines.append(f"QR page: <pre>{qr_url}</pre>")
+        lines.append(f"QR page: {qr_url}")
     new_format_text = "\n".join(lines)
     return f"{old_format_text}\n\n{new_format_text}"
 
