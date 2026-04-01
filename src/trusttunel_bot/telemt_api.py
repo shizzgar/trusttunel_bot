@@ -2,10 +2,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import json
+import logging
 import secrets
 from urllib import error, request
 
 from trusttunel_bot.config import BotConfig
+
+LOGGER = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -101,19 +104,31 @@ def _request_json(
             return json.loads(text)
     except error.HTTPError as exc:
         details = exc.read().decode("utf-8", errors="replace")
+        LOGGER.error(
+            "telemt API HTTP error: method=%s url=%s status=%s body=%s",
+            method,
+            url,
+            exc.code,
+            details,
+        )
         raise TelemtAPIError(f"telemt API request failed: HTTP {exc.code}, body={details}") from exc
     except error.URLError as exc:
+        LOGGER.error("telemt API network error: method=%s url=%s error=%s", method, url, exc)
         raise TelemtAPIError(f"telemt API request failed: {exc}") from exc
     except json.JSONDecodeError as exc:
+        LOGGER.error("telemt API invalid JSON: method=%s url=%s", method, url)
         raise TelemtAPIError("telemt API returned invalid JSON") from exc
 
 
 def _parse_user(payload: dict) -> TelemtUser:
+    payload = _unwrap_payload(payload)
     if not isinstance(payload, dict):
-        raise TelemtAPIError("Unexpected telemt user payload")
+        raise TelemtAPIError(f"Unexpected telemt user payload type: {type(payload).__name__}")
     username = payload.get("username")
     if not username:
-        raise TelemtAPIError("telemt user payload missing username")
+        preview = _safe_preview(payload)
+        LOGGER.error("telemt user payload missing username: payload=%s", preview)
+        raise TelemtAPIError(f"telemt user payload missing username; payload={preview}")
     secret = payload.get("secret")
     links_data = payload.get("links") or {}
     links = TelemtLinks(
@@ -126,3 +141,22 @@ def _parse_user(payload: dict) -> TelemtUser:
 
 def _generate_secret() -> str:
     return secrets.token_hex(16)
+
+
+def _unwrap_payload(payload):
+    if isinstance(payload, dict):
+        for key in ("user", "data", "result"):
+            value = payload.get(key)
+            if isinstance(value, dict) and value.get("username"):
+                return value
+    return payload
+
+
+def _safe_preview(payload) -> str:
+    try:
+        rendered = json.dumps(payload, ensure_ascii=False)
+    except (TypeError, ValueError):
+        return str(payload)
+    if len(rendered) > 400:
+        return rendered[:397] + "..."
+    return rendered

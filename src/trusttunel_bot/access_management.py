@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import logging
 import secrets
 
 from trusttunel_bot.config import BotConfig
@@ -13,6 +14,8 @@ from trusttunel_bot.telemt_api import (
     get_telemt_user,
 )
 from trusttunel_bot.user_management import add_user, delete_user
+
+LOGGER = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -88,7 +91,11 @@ def sync_tt_users_to_telemt(config: BotConfig) -> list[str]:
     created: list[str] = []
     credentials = load_credentials(config.credentials_file)
     for item in credentials:
-        if get_telemt_user(config, item.username) is None:
-            create_telemt_user(config, item.username)
-            created.append(item.username)
+        try:
+            if get_telemt_user(config, item.username) is None:
+                create_telemt_user(config, item.username)
+                created.append(item.username)
+        except Exception:
+            LOGGER.exception("Failed syncing username=%s to telemt", item.username)
+            raise
     return created

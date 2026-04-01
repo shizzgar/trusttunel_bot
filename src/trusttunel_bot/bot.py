@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
+import logging
 from pathlib import Path
 import secrets
 import tempfile
@@ -24,6 +25,8 @@ from trusttunel_bot.bundle import build_user_bundle
 from trusttunel_bot.config import BotConfig, load_config
 from trusttunel_bot.rules import format_rules_summary, load_rules
 from trusttunel_bot.user_management import list_users
+
+LOGGER = logging.getLogger(__name__)
 
 
 @dataclass
@@ -162,6 +165,7 @@ async def handle_callback(
         try:
             created = sync_tt_users_to_telemt(config)
         except RuntimeError as exc:
+            LOGGER.exception("Sync TT -> telemt failed")
             await _send_error(callback.bot, chat_id, f"Ошибка sync: {exc}")
         else:
             await callback.bot.send_message(
@@ -308,6 +312,7 @@ async def _send_bundle(
     try:
         bundle = build_user_bundle(config, username)
     except (RuntimeError, ValueError) as exc:
+        LOGGER.exception("Bundle generation failed for username=%s", username)
         await _send_error(bot, chat_id, f"Ошибка генерации: {exc}")
         return
 
@@ -540,6 +545,10 @@ def _ensure_bot_config(config: BotConfig) -> None:
 
 
 def run_bot() -> None:
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
     config = _load_bot_config()
     _ensure_bot_config(config)
 
