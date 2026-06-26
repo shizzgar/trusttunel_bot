@@ -2,10 +2,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+import html
 import os
 import secrets
 import subprocess
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
 
 from trusttunel_bot.config import BotConfig
 from trusttunel_bot.service import ServiceActionResult, restart_service
@@ -102,19 +103,42 @@ def delete_hev_socks5_user(config: BotConfig, username: str) -> bool:
 def format_hev_socks5_access(config: BotConfig, user: HevSocks5User) -> str:
     if not config.hev_socks5_public_host or not config.hev_socks5_public_port:
         raise ValueError("hev-socks5 public host/port must be configured")
-    scheme = config.hev_socks5_scheme or "socks5h"
-    username = quote(user.username, safe="")
-    password = quote(user.password, safe="")
-    uri = f"{scheme}://{username}:{password}@{config.hev_socks5_public_host}:{config.hev_socks5_public_port}"
+    telegram_link = _build_telegram_socks_link(config, user)
     return (
         "SOCKS5 доступ\n\n"
-        f"Host: {config.hev_socks5_public_host}\n"
-        f"Port: {config.hev_socks5_public_port}\n"
-        f"Username: {user.username}\n"
-        f"Password: {user.password}\n\n"
-        "URI:\n"
-        f"{uri}"
+        f"Host: <code>{_html(user_visible_host(config))}</code>\n"
+        f"Port: <code>{config.hev_socks5_public_port}</code>\n"
+        f"Username: <code>{_html(user.username)}</code>\n"
+        f"Password: <code>{_html(user.password)}</code>\n\n"
+        f'<a href="{_html_attr(telegram_link)}">Добавить SOCKS5 в Telegram</a>'
     )
+
+
+def _build_telegram_socks_link(config: BotConfig, user: HevSocks5User) -> str:
+    query = urlencode(
+        {
+            "server": user_visible_host(config),
+            "port": str(config.hev_socks5_public_port),
+            "user": user.username,
+            "pass": user.password,
+        },
+        quote_via=quote,
+    )
+    return f"https://t.me/socks?{query}"
+
+
+def user_visible_host(config: BotConfig) -> str:
+    if not config.hev_socks5_public_host:
+        raise ValueError("hev-socks5 public host must be configured")
+    return config.hev_socks5_public_host
+
+
+def _html(value: object) -> str:
+    return html.escape(str(value), quote=False)
+
+
+def _html_attr(value: object) -> str:
+    return html.escape(str(value), quote=True)
 
 
 def reload_hev_socks5(config: BotConfig) -> ServiceActionResult:

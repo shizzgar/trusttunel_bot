@@ -80,9 +80,11 @@ def test_delete_removes_only_requested_user(tmp_path):
     assert delete_hev_socks5_user(config, "missing") is False
 
 
-def test_format_url_encodes_credentials(tmp_path):
+def test_format_telegram_link_encodes_credentials_and_uses_copyable_code(tmp_path):
     config = _config(tmp_path)
     user = HevSocks5User("name+space", "p@ss word/", "10")
     text = format_hev_socks5_access(config, user)
-    assert "Password: p@ss word/" in text
-    assert "socks5h://name%2Bspace:p%40ss%20word%2F@proxy.example.com:1080" in text
+    assert "Password: <code>p@ss word/</code>" in text
+    assert "Username: <code>name+space</code>" in text
+    assert "https://t.me/socks?server=proxy.example.com&amp;port=1080&amp;user=name%2Bspace&amp;pass=p%40ss%20word%2F" in text
+    assert "socks5h://" not in text

@@ -19,7 +19,7 @@
   - TT CLI config (документ);
   - TT mobile profile (текст);
   - telemt canonical links (TLS / Classic / Secure);
-  - SOCKS5 параметры и URI (`socks5h://...`).
+  - SOCKS5 параметры в copy-friendly Telegram `<code>`-полях и ссылку `https://t.me/socks?...` для добавления proxy в Telegram.
 
 ## Требования
 
@@ -133,7 +133,7 @@ USERNAME PASSWORD MARK
 
 После изменения auth-файла бот пытается сделать live reload командой `killall -SIGUSR1 hev-socks5-server`. Если live reload не удался, используется fallback `systemctl restart <hev_socks5_service_name>`.
 
-Пароли SOCKS5 не ротируются при повторной выдаче доступа: существующая строка пользователя в auth-файле переиспользуется.
+Пароли SOCKS5 не ротируются при повторной выдаче доступа: существующая строка пользователя в auth-файле переиспользуется. При выдаче SOCKS5 бот отправляет host/port/username/password в Telegram `<code>`-формате для копирования по нажатию и ссылку `https://t.me/socks?server=...&port=...&user=...&pass=...` для добавления proxy в Telegram.
 
 ## Поведение sync для существующих TT пользователей
 
