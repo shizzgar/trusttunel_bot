@@ -71,7 +71,7 @@ telemt_sync_on_add = true
 
 # hev-socks5-server
 hev_socks5_enabled = true
-hev_socks5_auth_file = "/etc/hev-socks5-server/auth.txt"
+hev_socks5_auth_file = "/opt/hev-socks5-server/conf/auth.txt"
 hev_socks5_service_name = "hev-socks5-server"
 hev_socks5_public_host = "proxy.example.com"
 hev_socks5_public_port = 1080
@@ -87,11 +87,42 @@ hev_socks5_mark_start = 16
 
 Для включения SOCKS5 provider'а задайте `hev_socks5_enabled = true`, путь к auth-файлу, публичный host/port и, при необходимости, имя systemd/process service.
 
+Для твоей текущей схемы, где TrustTunnel, telemt и их конфиги живут в `/opt`, держи `hev-socks5-server` там же:
+
+```txt
+/opt/hev-socks5-server/
+  bin/hev-socks5-server
+  conf/main.yml
+  conf/auth.txt
+```
+
+Если репозиторий уже склонирован и собран в `/opt/hev-socks5-server`, достаточно создать `conf/auth.txt`, прописать его в `conf/main.yml`, а в `bot.toml` указать `hev_socks5_auth_file = "/opt/hev-socks5-server/conf/auth.txt"`.
+
+Пример systemd unit для `/opt`-layout:
+
+```ini
+[Unit]
+Description=hev-socks5-server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/hev-socks5-server
+ExecStart=/opt/hev-socks5-server/bin/hev-socks5-server /opt/hev-socks5-server/conf/main.yml
+Restart=on-failure
+RestartSec=3
+LimitNOFILE=65535
+
+[Install]
+WantedBy=multi-user.target
+```
+
 `main.yml` у `hev-socks5-server` должен ссылаться на тот же auth-файл, которым управляет бот:
 
 ```yaml
 auth:
-  file: /etc/hev-socks5-server/auth.txt
+  file: /opt/hev-socks5-server/conf/auth.txt
 ```
 
 Бот меняет **только auth-файл**, а не основной `main.yml`. Auth-файл сохраняется простым форматом, который ожидает `hev-socks5-server`:
