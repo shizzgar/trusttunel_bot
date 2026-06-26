@@ -26,3 +26,14 @@ telemt_public_port = 443
 telemt_tls_domain = "tm.xx-xx-xx-xx.sslip.io"
 telemt_lazy_create = true
 telemt_sync_on_add = true
+
+# hev-socks5-server
+hev_socks5_enabled = true
+hev_socks5_auth_file = "/opt/hev-socks5-server/conf/auth.txt"
+hev_socks5_service_name = "hev-socks5-server"
+hev_socks5_public_host = "proxy.example.com"
+hev_socks5_public_port = 1080
+hev_socks5_scheme = "socks5h"
+hev_socks5_sync_on_add = true
+hev_socks5_lazy_create = true
+hev_socks5_mark_start = 16

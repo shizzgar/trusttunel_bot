@@ -35,6 +35,15 @@ class BotConfig:
     telemt_tls_domain: str | None = None
     telemt_lazy_create: bool = True
     telemt_sync_on_add: bool = True
+    hev_socks5_enabled: bool = False
+    hev_socks5_auth_file: Path | None = None
+    hev_socks5_service_name: str = "hev-socks5-server"
+    hev_socks5_public_host: str | None = None
+    hev_socks5_public_port: int = 1080
+    hev_socks5_scheme: str = "socks5h"
+    hev_socks5_sync_on_add: bool = True
+    hev_socks5_lazy_create: bool = True
+    hev_socks5_mark_start: int = 0x10
 
 
 def load_config(path: Path) -> BotConfig:
@@ -68,6 +77,16 @@ def load_config(path: Path) -> BotConfig:
     telemt_lazy_create = bool(data.get("telemt_lazy_create", True))
     telemt_sync_on_add = bool(data.get("telemt_sync_on_add", True))
 
+    hev_socks5_enabled = bool(data.get("hev_socks5_enabled", False))
+    hev_socks5_auth_file = data.get("hev_socks5_auth_file")
+    hev_socks5_service_name = str(data.get("hev_socks5_service_name") or "hev-socks5-server")
+    hev_socks5_public_host = data.get("hev_socks5_public_host")
+    hev_socks5_public_port = int(data.get("hev_socks5_public_port", 1080))
+    hev_socks5_scheme = str(data.get("hev_socks5_scheme") or "socks5h")
+    hev_socks5_sync_on_add = bool(data.get("hev_socks5_sync_on_add", True))
+    hev_socks5_lazy_create = bool(data.get("hev_socks5_lazy_create", True))
+    hev_socks5_mark_start = int(data.get("hev_socks5_mark_start", 0x10))
+
     return BotConfig(
         credentials_file=Path(credentials_file),
         telegram_token=str(telegram_token) if telegram_token else None,
@@ -99,6 +118,15 @@ def load_config(path: Path) -> BotConfig:
         telemt_tls_domain=str(telemt_tls_domain) if telemt_tls_domain else None,
         telemt_lazy_create=telemt_lazy_create,
         telemt_sync_on_add=telemt_sync_on_add,
+        hev_socks5_enabled=hev_socks5_enabled,
+        hev_socks5_auth_file=Path(hev_socks5_auth_file) if hev_socks5_auth_file else None,
+        hev_socks5_service_name=hev_socks5_service_name,
+        hev_socks5_public_host=str(hev_socks5_public_host) if hev_socks5_public_host else None,
+        hev_socks5_public_port=hev_socks5_public_port,
+        hev_socks5_scheme=hev_socks5_scheme,
+        hev_socks5_sync_on_add=hev_socks5_sync_on_add,
+        hev_socks5_lazy_create=hev_socks5_lazy_create,
+        hev_socks5_mark_start=hev_socks5_mark_start,
     )
 
 
