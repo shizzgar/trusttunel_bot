@@ -24,7 +24,7 @@ from aiogram.types import (
 )
 
 from trusttunel_bot.access_management import add_access, delete_access, sync_tt_users_to_telemt
-from trusttunel_bot.bundle import build_user_bundle
+from trusttunel_bot.bundle import AccessKind, build_user_bundle
 from trusttunel_bot.config import BotConfig, load_config
 from trusttunel_bot.rules import format_rules_summary, load_rules
 from trusttunel_bot.user_management import list_users
@@ -84,7 +84,7 @@ def _menu_keyboard(is_admin: bool) -> InlineKeyboardMarkup:
 
 
 def _render_menu(is_admin: bool) -> str:
-    header = "Панель управления TrustTunnel + telemt"
+    header = "Панель управления TrustTunnel + telemt + SOCKS5"
     role = "Администратор" if is_admin else "Пользователь"
     return f"{header}\nРоль: {role}\n\nВыберите действие:"
 
@@ -148,7 +148,7 @@ async def handle_callback(
         await callback.answer("Недостаточно прав.")
         await show_menu(callback.bot, chat_id, is_admin)
         return
-    if action and action.startswith("delete_user:") and not is_admin:
+    if action and (action.startswith("delete_user:") or action.startswith("admin_access_kind:")) and not is_admin:
         await callback.answer("Недостаточно прав.")
         await show_menu(callback.bot, chat_id, is_admin)
         return
@@ -208,13 +208,14 @@ async def handle_callback(
         state_store.clear_state(chat_id)
     elif action == "my_access":
         state.mode = "my_access"
-        await _upsert_message(
-            callback.bot,
-            chat_id,
-            "Подготовка пакета доступа...",
-            _menu_keyboard(is_admin),
-        )
-        await _send_bundle(callback.bot, chat_id, config, callback.from_user.username)
+        state.pending_username = callback.from_user.username
+        await _show_access_kind_menu(callback.bot, chat_id, is_admin, callback_prefix="my_access_kind")
+    elif action and action.startswith("my_access_kind:"):
+        kind = _parse_access_kind(action)
+        if kind is None:
+            await callback.answer("Некорректный тип доступа.")
+            return
+        await _send_bundle(callback.bot, chat_id, config, callback.from_user.username, kind)
         await show_menu(callback.bot, chat_id, is_admin)
         state_store.clear_state(chat_id)
     elif action and action.startswith("delete_user:"):
@@ -259,13 +260,21 @@ async def handle_callback(
             await show_menu(callback.bot, chat_id, is_admin)
             state_store.clear_state(chat_id)
             return
-        await _upsert_message(
-            callback.bot,
-            chat_id,
-            f"Готовлю доступ для {username}...",
-            _menu_keyboard(is_admin),
-        )
-        await _send_bundle(callback.bot, chat_id, config, username)
+        state.pending_username = username
+        state.mode = "admin_bundle_kind"
+        await _show_access_kind_menu(callback.bot, chat_id, is_admin, callback_prefix="admin_access_kind")
+        return
+    elif action and action.startswith("admin_access_kind:"):
+        kind = _parse_access_kind(action)
+        if kind is None:
+            await callback.answer("Некорректный тип доступа.")
+            return
+        if not state.pending_username:
+            await callback.answer("Пользователь не выбран.")
+            await show_menu(callback.bot, chat_id, is_admin)
+            state_store.clear_state(chat_id)
+            return
+        await _send_bundle(callback.bot, chat_id, config, state.pending_username, kind)
         await show_menu(callback.bot, chat_id, is_admin)
         state_store.clear_state(chat_id)
         return
@@ -361,12 +370,13 @@ async def _send_bundle(
     chat_id: int,
     config: BotConfig,
     username: str | None,
+    kind: AccessKind = "all",
 ) -> None:
     if not username:
         await bot.send_message(chat_id=chat_id, text="У пользователя нет username.")
         return
     try:
-        bundle = build_user_bundle(config, username)
+        bundle = build_user_bundle(config, username, kind)
     except (RuntimeError, ValueError) as exc:
         LOGGER.exception("Bundle generation failed for username=%s", username)
         await _send_error(bot, chat_id, f"Ошибка генерации: {exc}")
@@ -391,7 +401,10 @@ async def _send_bundle(
             ),
         )
 
-    if config.telemt_enabled:
+    if bundle.socks5_access_text:
+        await bot.send_message(chat_id=chat_id, text=bundle.socks5_access_text)
+
+    if bundle.telemt_tls_links or (config.telemt_enabled and kind in {"telemt", "all"}):
         telemt_text = _format_telemt_links(bundle)
         await bot.send_message(chat_id=chat_id, text=telemt_text)
 
@@ -628,6 +641,37 @@ async def _show_admin_bundle_menu(
     )
 
 
+async def _show_access_kind_menu(
+    bot: Bot,
+    chat_id: int,
+    is_admin: bool,
+    *,
+    callback_prefix: str,
+) -> None:
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="🔐 TrustTunnel", callback_data=f"{callback_prefix}:trusttunnel")],
+            [InlineKeyboardButton(text="📨 telemt", callback_data=f"{callback_prefix}:telemt")],
+            [InlineKeyboardButton(text="🧦 SOCKS5", callback_data=f"{callback_prefix}:socks5")],
+            [InlineKeyboardButton(text="📦 Всё сразу", callback_data=f"{callback_prefix}:all")],
+            [InlineKeyboardButton(text="↩️ Назад", callback_data="back_to_menu")],
+        ]
+    )
+    await _upsert_message(
+        bot,
+        chat_id,
+        "Что отправить?\n\nВыберите, какой конфиг вы хотите получить:",
+        keyboard,
+    )
+
+
+def _parse_access_kind(action: str) -> AccessKind | None:
+    value = action.split(":", 1)[1] if ":" in action else ""
+    if value in {"trusttunnel", "telemt", "socks5", "all"}:
+        return value  # type: ignore[return-value]
+    return None
+
+
 def _parse_page(action: str) -> int:
     page_str = action.split(":", 1)[1] if ":" in action else ""
     try:
@@ -680,6 +724,13 @@ def _ensure_bot_config(config: BotConfig) -> None:
         raise RuntimeError("telegram_token must be set in bot.toml")
     if not config.admin_ids:
         raise RuntimeError("admin_ids must be set in bot.toml")
+    if config.hev_socks5_enabled:
+        if not config.hev_socks5_auth_file:
+            raise RuntimeError("hev_socks5_auth_file must be set when hev_socks5_enabled=true")
+        if not config.hev_socks5_public_host:
+            raise RuntimeError("hev_socks5_public_host must be set when hev_socks5_enabled=true")
+        if not config.hev_socks5_public_port:
+            raise RuntimeError("hev_socks5_public_port must be set when hev_socks5_enabled=true")
 
 
 def run_bot() -> None:

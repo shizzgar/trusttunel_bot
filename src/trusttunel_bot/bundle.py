@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 import tempfile
+from typing import Literal
 
 try:
     import tomllib
@@ -18,7 +19,11 @@ from trusttunel_bot.endpoint import (
     generate_endpoint_config,
     generate_endpoint_deeplink,
 )
+from trusttunel_bot.hev_socks5 import format_hev_socks5_access, ensure_hev_socks5_user
 from trusttunel_bot.telemt_api import ensure_telemt_user
+
+
+AccessKind = Literal["trusttunnel", "telemt", "socks5", "all"]
 
 
 @dataclass(frozen=True)
@@ -29,42 +34,61 @@ class UserBundle:
     telemt_tls_links: list[str]
     telemt_classic_links: list[str]
     telemt_secure_links: list[str]
+    socks5_access_text: str | None = None
 
 
-def build_user_bundle(config: BotConfig, username: str) -> UserBundle:
-    ensure_result = ensure_full_access(config, username)
+def build_user_bundle(config: BotConfig, username: str, kind: AccessKind = "all") -> UserBundle:
+    build_tt = kind in {"trusttunnel", "all"}
+    build_telemt = kind in {"telemt", "all"}
+    build_socks5 = kind in {"socks5", "all"}
+
+    ensure_result = ensure_full_access(
+        config,
+        username,
+        ensure_telemt=build_telemt,
+        ensure_socks5=build_socks5,
+    )
     if ensure_result is None:
         raise ValueError(f"User '{username}' not found in TrustTunnel credentials")
 
-    endpoint = generate_endpoint_config(config, username=username)
+    endpoint = generate_endpoint_config(config, username=username) if build_tt else None
     try:
-        deeplink = generate_endpoint_deeplink(config, username=username)
+        deeplink = generate_endpoint_deeplink(config, username=username) if build_tt else None
     except RuntimeError:
         deeplink = None
     tt_cli_config_path: Path | None = None
-    try:
-        client_config = generate_client_config_from_bot_config(
-            config,
-            endpoint_config_path=endpoint.output_path,
-        )
-        tt_cli_config_path = client_config.output_path
-    except (RuntimeError, ValueError):
-        tt_cli_config_path = _build_tt_uri_fallback_file(
-            endpoint.output_path,
-            username=username,
-            deeplink=deeplink,
-        )
+    if build_tt and endpoint is not None:
+        try:
+            client_config = generate_client_config_from_bot_config(
+                config,
+                endpoint_config_path=endpoint.output_path,
+            )
+            tt_cli_config_path = client_config.output_path
+        except (RuntimeError, ValueError):
+            tt_cli_config_path = _build_tt_uri_fallback_file(
+                endpoint.output_path,
+                username=username,
+                deeplink=deeplink,
+            )
 
-    mobile_profile = _build_combined_mobile_text(config, endpoint.output_path, deeplink=deeplink)
+    mobile_profile = (
+        _build_combined_mobile_text(config, endpoint.output_path, deeplink=deeplink)
+        if build_tt and endpoint is not None
+        else None
+    )
 
     tls_links: list[str] = []
     classic_links: list[str] = []
     secure_links: list[str] = []
-    if config.telemt_enabled:
+    if build_telemt and config.telemt_enabled:
         telemt_user = ensure_telemt_user(config, username)
         tls_links = telemt_user.links.tls
         classic_links = telemt_user.links.classic
         secure_links = telemt_user.links.secure
+
+    socks5_access_text = None
+    if build_socks5 and config.hev_socks5_enabled:
+        socks5_access_text = format_hev_socks5_access(config, ensure_hev_socks5_user(config, username))
 
     return UserBundle(
         username=username,
@@ -73,6 +97,7 @@ def build_user_bundle(config: BotConfig, username: str) -> UserBundle:
         telemt_tls_links=tls_links,
         telemt_classic_links=classic_links,
         telemt_secure_links=secure_links,
+        socks5_access_text=socks5_access_text,
     )
 
 
